@@ -1,6 +1,6 @@
-# Kinematic Suspension Simulation/Optimization Tool
+# SAGE (Suspension Analysis & Geometry Evaluator)
 
-A Python-based simulation suite for designing, analyzing, and optimizing off-road vehicle suspension geometry. This tool provides kinematic analysis, quasi-static dynamic terrain simulation, and hardpoint optimization for **Double A-Arm** (Front) and **Semi-Trailing Link** (Rear) suspension types.
+SAGE is a Python-based simulation suite for designing, analyzing, and optimizing off-road vehicle suspension geometry. This tool provides kinematic analysis, quasi-static dynamic terrain simulation, and hardpoint optimization for **Double A-Arm** (Front) and **Semi-Trailing Link** (Rear) suspension types.
 
 ## Key Features
 
