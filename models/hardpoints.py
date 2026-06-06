@@ -2,8 +2,8 @@ from __future__ import annotations
 
 # default
 import yaml
-from dataclasses import dataclass, field
-from typing import Dict
+from dataclasses import dataclass, field, fields
+from typing import List, Dict
 
 # third-party
 import numpy as np
@@ -18,18 +18,23 @@ class Hardpoints:
     wr: float = field(default=0.0, init=False)
     ww: float = field(default=0.0, init=False)
 
+    @property
+    def names(self) -> List[str]:
+        """Dynamically returns a list of all defined field names in the dataclass."""
+        return [f.name for f in fields(self)]
+
     def _fill_vehicle_properties(self, data):
         self.shock_min = data['shock_min']
         self.shock_max = data['shock_max']
-        self.wr = data['wheel_radius']
-        self.ww = data['wheel_width']
+        self.wr = data['wheel_properties']['radius']
+        self.ww = data['wheel_properties']['width']
 
     @classmethod
     def from_data(cls, data: dict) -> Hardpoints:
         raise NotImplementedError
     
     @classmethod
-    def link_lengths(cls, hp: Hardpoints) -> Dict[str, float]:
+    def link_lengths(cls, hp) -> Dict[str, float]:
         raise NotImplementedError
     
     @classmethod

@@ -1,8 +1,16 @@
-SOL_DT: 0.002 # [s]
-VIZ_DT: 0.05 # [s]
-DURATION: 15.0 # [s]
-VELOCITY: 2.0 # [m/s]
+SIMULATION: 'terrain' # 'terrain'
+
+SOL_DT: 0.005 # [s]
+VIZ_DT: 0.01 # [s]
+
+DURATION: 3.0 # [s]
+VELOCITY: 0.0 # [m/s]
+RAMP_DURATION: 2.0 # [s]
+KP_VELOCITY: 50.0 # [Nm/(rad/s)]
+
+HOIST_DURATION: 0.05 # [s]
+DROP_HEIGHT: 0.5 # [m]
 
 TERRAIN:
-  AMPLITUDE: 70.0 # [mm]
+  AMPLITUDE: 40.0 # [mm]
   FREQUENCY: 0.5 # [Hz]

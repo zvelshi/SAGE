@@ -3,6 +3,9 @@ from __future__ import annotations
 # default
 from typing import Dict, Tuple
 
+# third-party
+import numpy as np
+
 # ours
 from models.hardpoints import DoubleAArm, SemiTrailingLink
 from models.corners.double_a_arm import DoubleAArmNumeric
@@ -16,47 +19,37 @@ class Vehicle:
     def __init__(self, data: Dict = {}):
         self.nickname = list(data.keys())[0]
         vehicle_data = data[self.nickname]
+        
+        self.config = vehicle_data 
+        
+        sp = vehicle_data['mass_properties']
+        self.total_sprung_mass = sp['sprung_mass']
+        self.cog = tuple(sp['cog'])
+        self.inertia_matrix = np.array(vehicle_data['mass_properties']['inertia'])
+        
+        # Calculate front bias mathematically from exact CoG X-position
+        f_x = vehicle_data['front']['wheel_center'][0]
+        r_x = vehicle_data['rear']['wheel_center'][0]
+        wb = abs(f_x - r_x)
+        dist_from_rear = abs(self.cog[0] - r_x)
+        self.sprung_bias_f = dist_from_rear / wb
 
-        s_mass = vehicle_data.get('sprung_mass', {'fl': 0, 'fr': 0, 'rl': 0, 'rr': 0})
-        u_mass = vehicle_data.get('unsprung_mass', {'fl': 0, 'fr': 0, 'rl': 0, 'rr': 0})
-                            
-        self.front_left  = Corner(vehicle_data, (0, 0), s_mass['fl'], u_mass['fl'])
-        self.front_right = Corner(vehicle_data, (1, 0), s_mass['fr'], u_mass['fr'])
-        self.rear_left   = Corner(vehicle_data, (0, 1), s_mass['rl'], u_mass['rl'])
-        self.rear_right  = Corner(vehicle_data, (1, 1), s_mass['rr'], u_mass['rr'])
+        u_mass = vehicle_data['mass_properties']['unsprung_mass']
+        
+        self.front_left  = Corner(vehicle_data, (0, 0), u_mass['fl'])
+        self.front_right = Corner(vehicle_data, (1, 0), u_mass['fr'])
+        self.rear_left   = Corner(vehicle_data, (0, 1), u_mass['rl'])
+        self.rear_right  = Corner(vehicle_data, (1, 1), u_mass['rr'])
 
-        self.total_sprung_mass, self.sprung_bias_f = self._get_mass()
         log_to_file(f"Initialized Vehicle '{self.nickname}'")
-
-        self.cog = self._calculate_cog()
         log_to_file(f"Calculated COG at (x={self.cog[0]:.2f}, y={self.cog[1]:.2f}, z={self.cog[2]:.2f})")
-
-    def _get_mass(self) -> Tuple[float, float]:
-        corners = [self.front_left, self.front_right, self.rear_left, self.rear_right]
-
-        total_s = sum(c.sprung_mass for c in corners)
-        front_s = self.front_left.sprung_mass + self.front_right.sprung_mass
-
-        bias_f = (front_s / total_s)
-        return total_s, bias_f
-
-    def _calculate_cog(self) -> Tuple[float, float, float]:
-        corners = [self.front_left, self.front_right, self.rear_left, self.rear_right]
-
-        # Using Sprung Mass
-        sum_mx = sum(c.sprung_mass * c.hardpoints.wc[0] for c in corners)
-        sum_my = sum(c.sprung_mass * c.hardpoints.wc[1] for c in corners)
-
-        cg_x = sum_mx / self.total_sprung_mass
-        cg_y = sum_my / self.total_sprung_mass
-
-        return (cg_x, cg_y, 300)
+        log_to_file(f"Total Sprung Mass: {self.total_sprung_mass:.2f} kg | Front Bias: {self.sprung_bias_f*100:.1f}%")
 
     def run_simulation(self, simulation_class, **kwargs):
         simulation = simulation_class(self, kwargs.get("config", {}))
         return simulation.run()
 
-    def get_corner_from_id(self, id) -> Corner:
+    def get_corner_from_id(self, id) -> 'Corner':
         if id == [0, 0]: return self.front_left
         if id == [1, 0]: return self.front_right
         if id == [0, 1]: return self.rear_left
@@ -73,11 +66,9 @@ class Corner:
                 |       |
          (0, 1) |_______| (1, 1)
     """
-    def __init__(self, data: Dict, id: Tuple[int, int], sprung_mass: float, unsprung_mass: float):
+    def __init__(self, data: Dict, id: Tuple[int, int], unsprung_mass: float):
         self.id = id
-        self.sprung_mass = sprung_mass
         self.unsprung_mass = unsprung_mass
-        self.total_mass = sprung_mass + unsprung_mass
 
         if self.id[1] == 0:
             corner_data = data['front']

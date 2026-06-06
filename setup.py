@@ -9,6 +9,8 @@ setup(
         "scipy", 
         "matplotlib",
         "PyYAML",
-        "pymoo"
+        "pymoo",
+        "openpyxl",
+        "pandas",
     ],
 )

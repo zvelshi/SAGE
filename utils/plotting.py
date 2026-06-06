@@ -427,28 +427,45 @@ class ParetoPlotter:
 
 class DynamicPlotter(Plotter):
     """
-    Creates an animated dashboard showing the suspension geometry and kinematics over time.
+    Creates an animated dashboard showing the suspension geometry, kinematics, 
+    and chassis velocity tracking over time.
     """
     def animate(self, steps: List[Dict], vehicle, config):
         if not steps: return
 
-        interval = config['VIZ_DT'] 
+        interval = config['VIZ_DT'] * 1000 # Convert to ms for matplotlib FuncAnimation
         
-        fig = plt.figure(figsize=(18, 12)) 
-        gs = fig.add_gridspec(3, 2, width_ratios=[2, 1]) 
+        fig = plt.figure(figsize=(18, 14)) 
+        # Increased to 4 rows to include the velocity controller plot
+        gs = fig.add_gridspec(4, 2, width_ratios=[2, 1]) 
         
         ax3d = fig.add_subplot(gs[:, 0], projection='3d')
         ax_camber = fig.add_subplot(gs[0, 1])
         ax_caster = fig.add_subplot(gs[1, 1])
         ax_toe    = fig.add_subplot(gs[2, 1])
+        ax_vel    = fig.add_subplot(gs[3, 1])
 
         corners = ['fl', 'fr', 'rl', 'rr']
         styles  = {'fl': 'b-', 'fr': 'r-', 'rl': 'b--', 'rr': 'r--'}
         labels  = {'fl': 'FL', 'fr': 'FR', 'rl': 'RL', 'rr': 'RR'}
         data_store = {c: {'camber': [], 'caster': [], 'toe': [], 'time': []} for c in corners}
         
+        # Velocity Tracking Data
+        times = []
+        actual_vels = []
+        target_vels = []
+        v_max = config.get('VELOCITY', 5.0)
+        t_ramp = config.get('RAMP_DURATION', 1.0)
+
         for s in steps:
             t = s['time']
+            times.append(t)
+            
+            # Record Velocity (taking absolute value so it plots positively for easier reading)
+            vx_ms = abs(s.get('chassis_vx', 0.0)) / 1000.0
+            actual_vels.append(vx_ms)
+            target_vels.append((v_max / t_ramp) * t if t < t_ramp else v_max)
+
             for c_name in corners:
                 if c_name in s['corners']:
                     att = get_wheel_attitude(s['corners'][c_name])
@@ -477,10 +494,16 @@ class DynamicPlotter(Plotter):
                 ln_cas, = ax_caster.plot([], [], styles[c_name], lw=1.5)
                 lines_caster[c_name] = ln_cas
 
+        # Setup Velocity Plot Lines
+        ln_v_targ, = ax_vel.plot([], [], 'k--', lw=2, label="Target Vel")
+        ln_v_act,  = ax_vel.plot([], [], 'g-', lw=2, label="Actual Vel")
+
         ax_camber.set_title("Camber [deg]"); ax_camber.grid(True); ax_camber.legend(loc='upper right', ncol=2, fontsize='small')
         ax_caster.set_title("Front Caster [deg]"); ax_caster.grid(True)
-        ax_toe.set_title("Toe [deg]"); ax_toe.set_xlabel("Time [s]"); ax_toe.grid(True)
+        ax_toe.set_title("Toe [deg]"); ax_toe.grid(True)
+        ax_vel.set_title("Chassis Velocity Tracking [m/s]"); ax_vel.set_xlabel("Time [s]"); ax_vel.grid(True); ax_vel.legend(loc='lower right')
 
+        # Set Limits for Kinematics
         for ax, key, subset in zip([ax_camber, ax_caster, ax_toe], ['camber', 'caster', 'toe'], [corners, ['fl','fr'], corners]):
             all_vals = []
             for c in subset: all_vals.extend(data_store[c][key])
@@ -488,61 +511,148 @@ class DynamicPlotter(Plotter):
             if all_vals:
                 ax.set_ylim(min(all_vals)-1, max(all_vals)+1)
                 ax.set_xlim(0, steps[-1]['time'])
+                
+        # Set Limits for Velocity
+        ax_vel.set_xlim(0, steps[-1]['time'])
+        ax_vel.set_ylim(0, v_max + 1.0)
 
         def draw_terrain(ax, current_x_mm):
-            x_range_mm = np.linspace(current_x_mm - 4000, current_x_mm + 4000, 80)
+            """Draws a 3D terrain surface blending from Left (0 phase) to Right (pi phase)"""
+            x_range_mm = np.linspace(current_x_mm - 3000, current_x_mm + 3000, 60)
+            y_range_mm = np.linspace(-1200, 1200, 20)
+            X, Y = np.meshgrid(x_range_mm, y_range_mm)
+            
+            # Smoothly interpolate phase shift across the vehicle track width 
+            # Assuming ~1500mm track width. Left side (+750Y) gets 0 phase, Right side (-750Y) gets Pi phase.
+            phase_shift = np.clip((750 - Y) / 1500.0 * np.pi, 0, np.pi)
             
             t_cfg = config['TERRAIN']
-            x_m = x_range_mm / 1000.0
-            z_mm = t_cfg['AMPLITUDE'] * np.sin(2 * np.pi * t_cfg['FREQUENCY'] * x_m)
+            x_m = X / 1000.0
+            Z = t_cfg['AMPLITUDE'] * np.sin((2 * np.pi * t_cfg['FREQUENCY'] * x_m) + phase_shift)
             
-            y_width_mm = 1200.0 
-            X, Y = np.meshgrid(x_range_mm, np.array([-y_width_mm, y_width_mm]))
-            Z = np.vstack([z_mm, z_mm])
-            ax.plot_wireframe(X, Y, Z, color='green', alpha=0.1, rstride=10, cstride=5)
+            # Using plot_surface instead of wireframe makes the whoops much easier to visualize
+            ax.plot_surface(X, Y, Z, color='green', alpha=0.3, edgecolor='none')
+
+        # def draw_terrain(ax, current_x_mm):
+        #     """Draws discrete, high-resolution staggered whoops without surface tearing"""
+        #     x_range_mm = np.linspace(current_x_mm - 2000, current_x_mm + 4000, 600)
+            
+        #     whoop_height_mm = 11.0 * 25.4
+        #     whoop_spacing_mm = 7.5 * 12.0 * 25.4
+        #     whoop_width_mm = 18.0 * 25.4
+
+        #     # --- THE MANUAL OFFSET DIAL ---
+        #     # Tweak this number (in mm) to slide the visual terrain forward/backward
+        #     visual_offset_mm = 1000.0 
+
+        #     # --- LEFT SIDE TERRAIN ---
+        #     y_left = np.linspace(0, 1200, 15)
+        #     X_L, Y_L = np.meshgrid(x_range_mm, y_left)
+            
+        #     # Apply the offset before the modulo
+        #     local_x_L = (X_L + visual_offset_mm) % whoop_spacing_mm
+            
+        #     Z_L = np.where(
+        #         local_x_L < whoop_width_mm,
+        #         whoop_height_mm * np.sin((local_x_L / whoop_width_mm) * np.pi),
+        #         0.0
+        #     )
+        #     ax.plot_surface(X_L, Y_L, Z_L, color='sandybrown', alpha=0.6, edgecolor='none')
+
+        #     # --- RIGHT SIDE TERRAIN ---
+        #     y_right = np.linspace(-1200, 0, 15)
+        #     X_R, Y_R = np.meshgrid(x_range_mm, y_right)
+            
+        #     # Apply the half-spacing stagger AND the manual offset
+        #     local_x_R = (X_R + (whoop_spacing_mm / 2.0) + visual_offset_mm) % whoop_spacing_mm
+            
+        #     Z_R = np.where(
+        #         local_x_R < whoop_width_mm,
+        #         whoop_height_mm * np.sin((local_x_R / whoop_width_mm) * np.pi),
+        #         0.0
+        #     )
+        #     ax.plot_surface(X_R, Y_R, Z_R, color='peru', alpha=0.6, edgecolor='none')
 
         def update(frame):
             step = steps[frame]
             t = step['time']
             car_x = step['x_pos']
 
+            # Update 2D Plot Lines
             for c_name in corners:
                 ts = data_store[c_name]['time']
                 if frame < len(ts):
                     lines_camber[c_name].set_data(ts[:frame], data_store[c_name]['camber'][:frame])
                     lines_toe[c_name].set_data(ts[:frame], data_store[c_name]['toe'][:frame])
-                    if c_name in lines_caster:
+                    if 'f' in c_name:
                         lines_caster[c_name].set_data(ts[:frame], data_store[c_name]['caster'][:frame])
 
+            # Update Velocity Plot
+            ln_v_targ.set_data(times[:frame], target_vels[:frame])
+            ln_v_act.set_data(times[:frame], actual_vels[:frame])
+
             ax3d.cla()
-            ax3d.set_title(f"Sim")
-            
             draw_terrain(ax3d, car_x)
             
-            cg_lx = step['cog_x']
-            cg_vz = step['cog_z']
+            # --- 6-DOF KINEMATICS ---
+            chassis_z = step['chassis_z']
+            pitch_angle = step['pitch_angle']
+            roll_angle = step.get('roll_angle', 0.0)
+            yaw_angle = step.get('yaw_angle', 0.0)
+            
+            cp, sp = np.cos(pitch_angle), np.sin(pitch_angle)
+            cr, sr = np.cos(roll_angle), np.sin(roll_angle)
+            
+            R_pitch = np.array([
+                [cp,  0, sp],
+                [0,   1,  0],
+                [-sp, 0, cp]
+            ])
+            R_roll = np.array([
+                [1,  0,   0],
+                [0, cr, -sr],
+                [0, sr,  cr]
+            ])
+            R_rot = R_pitch @ R_roll 
+
+            # --- CALCULATE TRUE GLOBAL CoG ---
+            static_cog = np.array(vehicle.cog)
+            global_cog = np.array([
+                car_x + static_cog[0], 
+                step.get('y_pos', 0.0) + static_cog[1], 
+                chassis_z + static_cog[2]
+            ])
+
+            # Draw the Center of Gravity
             ax3d.scatter(
-                [car_x + cg_lx], [0], [cg_vz], 
+                [global_cog[0]], [global_cog[1]], [global_cog[2]], 
                 color='black', marker='D', s=180, label="CoG", zorder=100
             )
 
-            global_offset = np.array([car_x, 0, 0])
+            # --- LIVE TELEMETRY OVERLAY ---
+            r_deg, p_deg, y_deg = np.degrees(roll_angle), np.degrees(pitch_angle), np.degrees(yaw_angle)
+            title_text = (f"Sim Time: {t:.2f}s | Target Vel: {target_vels[frame]:.2f} m/s\n"
+                          f"XYZ: [{global_cog[0]:.1f}, {global_cog[1]:.1f}, {global_cog[2]:.1f}] mm\n"
+                          f"RPY: [{r_deg:.2f}°, {p_deg:.2f}°, {y_deg:.2f}°]")
+            ax3d.set_title(title_text, fontsize=10, loc='left')
 
+            # --- APPLY ROTATION AROUND CoG ---
             for corner_name, corner_data in step['corners'].items():
                 is_front = 'f' in corner_name
                 is_left = 'l' in corner_name
                 
-                if is_front:
-                    hp_static = vehicle.front_left.hardpoints if is_left else vehicle.front_right.hardpoints
-                else:
-                    hp_static = vehicle.rear_left.hardpoints if is_left else vehicle.rear_right.hardpoints
+                hp_static = vehicle.front_left.hardpoints if is_front else vehicle.rear_left.hardpoints
+                if not is_left:
+                    hp_static = vehicle.front_right.hardpoints if is_front else vehicle.rear_right.hardpoints
 
                 shifted_step = {}
                 for k, v in corner_data.items():
                     if k == 'wheel_axis':
-                        shifted_step[k] = v
+                        shifted_step[k] = R_rot @ v
                     elif isinstance(v, np.ndarray) and v.shape == (3,):
-                        shifted_step[k] = v + global_offset
+                        # Shift to CoG, rotate, shift to global
+                        delta = v - static_cog
+                        shifted_step[k] = (R_rot @ delta) + global_cog
                     else:
                         shifted_step[k] = v
 
@@ -550,7 +660,9 @@ class DynamicPlotter(Plotter):
                 shp = ShiftedHP()
                 for k, v in hp_static.__dict__.items():
                     if isinstance(v, np.ndarray) and v.shape == (3,):
-                        setattr(shp, k, v + global_offset)
+                        # Shift to CoG, rotate, shift to global
+                        delta = v - static_cog
+                        setattr(shp, k, (R_rot @ delta) + global_cog)
                     else:
                         setattr(shp, k, v)
 
@@ -559,11 +671,11 @@ class DynamicPlotter(Plotter):
                 else:
                     self._render_semi_trailing(ax3d, shifted_step, shp, color_main='blue' if is_left else 'red')
 
-            ax3d.set_xlim(car_x - 2000, car_x + 2000)
+            # Shifted camera limits: Because we drive in -X, we want more camera room "behind" the car
+            ax3d.set_xlim(car_x - 750, car_x + 2250)
             ax3d.set_ylim(-1000, 1000)
-            ax3d.set_zlim(-100, 1100)
-            ax3d.set_box_aspect([4, 2, 1.2]) 
-
-        ani = FuncAnimation(fig, update, frames=len(steps), interval=interval, blit=False)
-        plt.tight_layout()
+            ax3d.set_zlim(0, 1500) 
+            ax3d.set_box_aspect([3, 2, 1.5])
+        
+        anim = FuncAnimation(fig, update, frames=len(steps), interval=interval)
         plt.show()

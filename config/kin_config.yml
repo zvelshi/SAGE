@@ -1,6 +1,6 @@
 HARDPOINTS: '2026'
 SIM_STEPS:  178         # Number of steps for sweeping sim
-SIMULATION: 'travel'    # 'steer', 'steer_travel', 'travel', 'ackermann'
+SIMULATION: 'travel'    # 'steer', 'steer_travel', 'travel', 'ackermann', 'extreme'
 
 HALF: 'front' # 'front' or 'rear'
 SIDE: 'right' # 'left' or 'right'

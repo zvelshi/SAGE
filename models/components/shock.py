@@ -29,11 +29,10 @@ class Shock:
 
     @classmethod
     def from_config(cls, config: dict, shock_max_ref: float, shock_min_ref: float):
-        s_data = config.get('shock_setup', {})
+        s_data = config.get('shock_setup', {})        
         return cls(
-            # FIXED: changed preload_mm to preload
             spring=Spring(stiffness=s_data['spring_rate'], preload=s_data['preload']),
-            damper=Damper(c_comp=s_data['damping_rate'], c_rebound=s_data['damping_rate']),
+            damper=Damper(c_comp=s_data['compression_damping'], c_rebound=s_data['rebound_damping']),
             shock_max=shock_max_ref,
             shock_min=shock_min_ref
         )

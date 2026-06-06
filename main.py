@@ -8,10 +8,10 @@ import yaml
 # ours
 import optimization.objectives as opt_objs
 from models.vehicle import Vehicle
-from simulations.scenarios import SuspensionSweep, AckermannScenario, DynamicScenario
+from simulations.scenarios import SuspensionSweep, AckermannScenario, DynamicScenario, ExtremePoints
 from optimization.engine import SuspensionOptimizer
 from utils.plotting import Plotter, ParetoPlotter, DynamicPlotter
-from utils.misc import setup_logging, log_to_file, save_configs
+from utils.misc import setup_logging, log_to_file, save_configs, export_extreme_points_to_xlsx
 
 def load_data_only(kin_config_path: str):
     """Loads configuration dicts without instantiating the Vehicle."""
@@ -53,6 +53,17 @@ def handle_kinsim(args):
 
         print(f"-> Running Single Corner Sweep: {corner_id} [{sim_type}]...")
         scenario = SuspensionSweep(vehicle, config)
+
+    elif sim_type == "extreme":
+        print("-> Running Extreme Points Analysis...")
+        scenario = ExtremePoints(vehicle, config)
+        results = scenario.run()
+        for name, data in results.items():
+            print(f"\n{name.upper()}:")
+            for key, value in data.items():
+                print(f"  {key}: {value}")
+        export_extreme_points_to_xlsx(results, run_dir, config, template_path="utils/HARDPOINTS_TEMPLATE.xlsx")
+        return
 
     else:
         print(f"Error: Unknown simulation type '{sim_type}'")
@@ -138,18 +149,29 @@ def handle_dynsim(args):
     with open(args.dyn_config, "r") as f:
         dyn_config = yaml.safe_load(f)
     vehicle, kin_config = load_vehicle(args.kin_config)
+    
+    # Merge configs (dyn_config overrides kin_config where they overlap)
     config = {**kin_config, **dyn_config}
     save_configs(run_dir, [args.kin_config, args.dyn_config], config.get('HARDPOINTS'))
 
-    scenario = DynamicScenario(vehicle, config)
+    # Determine which dynamic scenario to run (default to 'terrain')
+    sim_type = config["SIMULATION"]
+    
+    if sim_type == "terrain":
+        print("-> Running Dynamic Terrain Simulation...")
+        scenario = DynamicScenario(vehicle, config)
+        plot_title = "Dynamic Terrain Run"
+    else:
+        print(f"Error: Unknown dynamic simulation type '{sim_type}' in dyn_config.yml")
+        return
     results = scenario.run()
 
     if not results:
-        print("Dynamic run produced no results.")
+        print(f"[{sim_type.upper()}] run produced no results.")
         return
 
     print(f"-> Starting Animation ({len(results)} frames)...")
-    plotter = DynamicPlotter(title="Dynamic Run", save_dir=run_dir)
+    plotter = DynamicPlotter(title=plot_title, save_dir=run_dir)
     plotter.animate(results, vehicle, config)
 
 def main():

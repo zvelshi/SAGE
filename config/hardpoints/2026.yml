@@ -3,27 +3,35 @@
 baja_2026:
   shock_min: 327.025 # [mm]
   shock_max: 504.825 # [mm]
-  wheel_radius: 292.100 # [mm]
-  wheel_width: 203.200 # [mm]
 
-  sprung_mass: # [kg]
-    fl: 31.324
-    fr: 24.244
-    rl: 31.440
-    rr: 40.126
-  unsprung_mass: # [kg]
-    fl: 17.986
-    fr: 17.986
-    rl: 14.820
-    rr: 14.534
+  wheel_properties:
+    radius: 292.100 # [mm]
+    width: 203.200 # [mm]
+    stiffness: 25.0 # [N/mm]
+    damping: 3.0 # [N*s/mm]
+
+  mass_properties:
+    sprung_mass: 125.366316 # [kg]
+    unsprung_mass: # [kg]
+      fl: 18
+      fr: 18
+      rl: 18
+      rr: 18
+    cog: [1136.363, 5.903, 300] #644.601] # [mm]
+    inertia: [ # [kg*m^2]
+        [66.234342, 1.102215, -92.936421],
+        [1.102215, 260.861372, -0.555730],
+        [-92.936421, -0.555730, 200.617464],
+      ]
 
   front:
     _type: 'DoubleAArm'
 
     # shocks setup
     shock_setup:
-      spring_rate: 14 # [N/mm]
-      damping_rate: 10 # [N*s/mm]
+      spring_rate: 10 # [N/mm]
+      compression_damping: 0.5 # [N*s/mm]
+      rebound_damping: 0.5 # [N*s/mm]
       preload: 0.0 # [mm]
       free_length: 254 # [mm]
 
@@ -38,8 +46,8 @@ baja_2026:
     lower_ball_joint: [265.000, 652.000, 205.000]
 
     # steering_points
-    tie_rod_inboard:  [156.823, 229.000, 500.000] #orig[156.823, 229.000, 500.000]  #sol20[166.759, 201.109, 475.499]  #sol26[162.985, 208.511, 466.788]
-    tie_rod_outboard: [204.600, 643.423, 352.461] #orig[204.600, 643.423, 352.461]  #lmp  [204.690, 633.240, 322.470]  #sol26[202.898, 649.330, 310.242]
+    tie_rod_inboard:  [158.985, 208.511, 466.788] #orig[156.823, 229.000, 500.000]  #sol20[166.759, 201.109, 475.499]  #sol26[162.985, 208.511, 466.788] #sol26mod[158.985, 208.511, 466.788]
+    tie_rod_outboard: [195.898, 649.330, 310.242] #orig[204.600, 643.423, 352.461]  #lmp  [204.690, 633.240, 322.470]  #sol26[202.898, 649.330, 310.242] #sol26mod[195.898, 649.330, 310.242]
 
     # shock points
     shock_location: "lower"
@@ -58,8 +66,9 @@ baja_2026:
 
     # shocks setup
     shock_setup:
-      spring_rate: 19 # [N/mm]
-      damping_rate: 10 # [N*s/mm]
+      spring_rate: 10 # [N/mm]
+      compression_damping: 0.5 # [N*s/mm]
+      rebound_damping: 0.5 # [N*s/mm]
       preload: 0.0 # [mm]
       free_length: 254 # [mm]
 
