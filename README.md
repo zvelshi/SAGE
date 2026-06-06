@@ -7,6 +7,7 @@ SAGE is a Python-based simulation suite for designing, analyzing, and optimizing
 * **Kinematic Analysis (`kin`)**:
     * Sweep suspension through Travel (Bump/Droop) and Steering.
     * Calculate key metrics: Camber, Caster, Toe, and CV Joint angles.
+    * Resolve global positions of outboard points through travel/steer and export to SOLIDWORKS.
     * **Ackermann Geometry**: Analyze steering geometry percentages and curves across the full rack travel.
 * **Dynamic Simulation (`dyn`)**:
     * **Live 3D Visualization**: Watch the vehicle drive over procedural terrain in real-time.
