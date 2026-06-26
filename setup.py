@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="baja_suspension",
-    version="0.2",
+    version="0.3",
     packages=find_packages(),
     install_requires=[
         "numpy",
@@ -12,5 +12,7 @@ setup(
         "pymoo",
         "openpyxl",
         "pandas",
+        "nicegui"
+        "plotly"
     ],
 )
