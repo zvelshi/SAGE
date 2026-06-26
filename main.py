@@ -8,7 +8,9 @@ import yaml
 # ours
 import optimization.objectives as opt_objs
 from models.vehicle import Vehicle
-from simulations.scenarios import SuspensionSweep, AckermannScenario, DynamicScenario, ExtremePoints
+from simulations.scenarios.kin.ackermann import AckermannScenario
+from simulations.scenarios.kin.extremepoints import ExtremePoints
+from simulations.scenarios.kin.sweep import SuspensionSweep
 from optimization.engine import SuspensionOptimizer
 from utils.plotting import Plotter, ParetoPlotter, DynamicPlotter
 from utils.misc import setup_logging, log_to_file, save_configs, export_extreme_points_to_xlsx

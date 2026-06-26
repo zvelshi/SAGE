@@ -13,7 +13,8 @@ from pymoo.operators.mutation.pm import PolynomialMutation
 
 # ours
 from models.vehicle import Vehicle
-from simulations.scenarios import SuspensionSweep, AckermannScenario
+from simulations.scenarios.kin.ackermann import AckermannScenario
+from simulations.scenarios.kin.sweep import SuspensionSweep
 from utils.misc import log_to_file
 
 class SuspensionProblem(ElementwiseProblem):
@@ -131,7 +132,7 @@ class SuspensionOptimizer:
         """
          Maps scenario keys to their corresponding classes.
         """
-        if key in ['steer', 'travel', 'steer_travel']: 
+        if key in ['steer', 'travel', 'steer_travel', 'droop_steer', 'jounce_steer']: 
             return SuspensionSweep
         if key == 'ackermann': 
             return AckermannScenario
