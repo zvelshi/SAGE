@@ -8,8 +8,7 @@ from utils.sim_runners import _run_kin, _run_opt
 from utils.scene3d import _build_scene, _update_scene, _fit_camera
 from utils.plot2d import _build_kin_figures, _build_ackermann_figures, _build_opt_figures, _move_vline
 
-# ── config paths ───────────────────────────────────────────────────────────────
-SCRUB_FPS = 48   # steps per second during auto-play
+SCRUB_FPS = 48
 
 KIN_PATH = "config/kin_config.yml"
 DYN_PATH = "config/dyn_config.yml"
@@ -21,11 +20,6 @@ SIM_TYPES = {
     "dyn": ["terrain"],
     "opt": ["run"],
 }
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# PAGE
-# ══════════════════════════════════════════════════════════════════════════════
 
 @ui.page("/")
 def main_page():
@@ -48,17 +42,14 @@ def main_page():
     }
     scrub = {"dirty": False, "idx": 0, "playing": False, "last_t": 0.0}
 
-    # ── styles ─────────────────────────────────────────────────────────────────
     ui.add_head_html("""<style>
         body,html{margin:0;padding:0;height:100vh;overflow:hidden}
         .nicegui-content{padding:0!important;height:100vh!important;overflow:hidden!important}
         .cm-editor{height:100%!important}.cm-scroller{overflow:auto!important}
     </style>""")
 
-    # ── outer split ────────────────────────────────────────────────────────────
     with ui.row().classes("w-full gap-0").style("height:100vh;overflow:hidden"):
 
-        # ══ LEFT ═══════════════════════════════════════════════════════════════
         with ui.column().classes("border-r border-gray-300").style(
             "width:400px;min-width:400px;height:100vh;display:flex;"
             "flex-direction:column;overflow:hidden"
@@ -92,7 +83,6 @@ def main_page():
                 save_btn = ui.button("Save").props("unelevated dense").classes("bg-gray-700 text-white text-sm px-3")
                 run_btn  = ui.button("Run" ).props("unelevated dense").classes("bg-blue-600 text-white text-sm px-3")
 
-        # ══ RIGHT ══════════════════════════════════════════════════════════════
         with ui.column().style(
             "flex:1;height:100vh;display:flex;flex-direction:column;overflow:hidden;background:#f8fafc"
         ):
@@ -114,7 +104,7 @@ def main_page():
                 step_lbl = ui.label("—").classes("text-xs text-gray-500 font-mono")
                 play_btn.visible = False
 
-    # ── callbacks ──────────────────────────────────────────────────────────────
+    # callbacks
     def on_mode_change(e):
         mode_ref["v"] = e.value
         opts = SIM_TYPES[e.value]
@@ -232,8 +222,7 @@ def main_page():
 
     ui.timer(1.0 / (SCRUB_FPS * 2), _apply_scrub)   # 2× SCRUB_FPS polling
 
-    # ── result renderers ────────────────────────────────────────────────────────
-
+    # result renderers 
     def _setup_scrubber(n):
         play_btn.props("icon=play_arrow")
         play_btn.visible = True
@@ -243,14 +232,14 @@ def main_page():
         scrub["playing"] = False
 
     def _render_kin(result):
-        sim_type, steps, vehicle, cfg, corner_id = result
+        sim_type, steps, vehicle, cfg, corner_id, run_dir = result
 
         with viz_area:
             if not steps:
                 ui.label("No valid solution steps returned.").classes("text-red-500 text-sm"); return
 
             if sim_type == "extreme":
-                _render_extreme(steps); return
+                _render_extreme(steps, run_dir, cfg); return
 
             corner = vehicle.get_corner_from_id(corner_id)
             hp     = corner.hardpoints
@@ -266,7 +255,7 @@ def main_page():
             cache["xs"]         = xs
             cache["named_figs"] = named_figs
 
-            # ── 3-D view ──────────────────────────────────────────────────────
+            # 3D view
             with ui.card().classes("w-full p-0 overflow-hidden").style("flex-shrink:0"):
                 with ui.row().classes("items-center px-3 py-1 bg-gray-100 border-b border-gray-200"):
                     ui.label("3D View").classes("text-sm font-semibold text-gray-700")
@@ -281,7 +270,7 @@ def main_page():
             _update_scene(scene_objs, steps[0], sim_type, vehicle, hp)
             cache["scene_objs"] = scene_objs
 
-            # ── 2-D plots ─────────────────────────────────────────────────────
+            # 2D plots
             ncols = 3 if len(named_figs) >= 3 else len(named_figs)
             with ui.grid(columns=ncols).classes("w-full gap-2"):
                 plot_elems = []
@@ -292,9 +281,21 @@ def main_page():
 
             _setup_scrubber(len(steps))
 
-    def _render_extreme(data):
+    def _render_extreme(data, run_dir, cfg):
         with viz_area:
             ui.label("Extreme Points Results").classes("font-bold text-base mt-1")
+            
+            hp_name = cfg.get("HARDPOINTS", "UNKNOWN")
+            import os
+            out_file = os.path.abspath(os.path.join(run_dir, f"HARDPOINTS_{hp_name}.xlsx"))
+            with ui.row().classes("items-center gap-2 mt-1 mb-2 bg-blue-50 p-2 rounded w-full"):
+                ui.icon("folder", color="blue")
+                ui.label(f"Exported to: {out_file}").classes("text-sm text-gray-700 font-mono")
+                
+            ui.link("How to import this data into SolidWorks", 
+                    "https://docs.google.com/document/d/1YMDovPIkaAoIByOL9fQeDe5OqUxFQ4b42RDFjEYWVxo/edit?usp=sharing",
+                    new_tab=True).classes("text-blue-600 text-sm underline mb-4 block")
+
             for half, sides in data.items():
                 ui.label(half.upper()).classes("font-semibold text-sm mt-2 text-gray-700")
                 for side, conditions in sides.items():
@@ -325,7 +326,7 @@ def main_page():
                                     ).classes("text-xs w-full").props("dense flat")
 
     def _render_opt(result):
-        res, optimizer, cfg = result
+        res, optimizer, cfg, run_dir = result
         F = res.F
         obj_names = [o.name for o in optimizer.objectives]
 
@@ -354,6 +355,4 @@ def main_page():
     run_btn.on_click(do_run)
     play_btn.on_click(do_play_pause)
 
-
-# ── entry point ────────────────────────────────────────────────────────────────
 ui.run(title="SAGE - Suspension Analysis", port=8080, reload=False, show=True, favicon="⚙️")

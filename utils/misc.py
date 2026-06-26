@@ -15,6 +15,11 @@ class DualLogger(object):
         self.log = open(filepath, "a", encoding='utf-8')
         self.buffer = ""
 
+    def set_new_log(self, filepath):
+        """Closes the current log and starts writing to a new one."""
+        self.log.close()
+        self.log = open(filepath, "a", encoding='utf-8')
+
     def write(self, message):
         """Standard print() calls go here: Terminal + File"""
         self.terminal.write(message)
@@ -52,6 +57,8 @@ def setup_logging(mode: str):
     if not isinstance(sys.stdout, DualLogger):
         sys.stdout = DualLogger(log_path)
         sys.stderr = sys.stdout
+    else:
+        sys.stdout.set_new_log(log_path)
     print(f"--- Run Directory Created: {run_dir} ---")
     print(f"--- Logging Started: {log_path} ---")
     return run_dir

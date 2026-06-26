@@ -20,7 +20,6 @@ def _vline_shape(x):
 
 
 def _build_kin_figures(steps):
-    """Return (named_figs, xs).  named_figs = list of (name, go.Figure)."""
     atts = [get_wheel_attitude(s) for s in steps]
     plunge, a_ib, a_ob = [], [], []
     for s in steps:
