@@ -8,7 +8,7 @@ from utils.sim_runners import _run_kin, _run_opt
 from utils.scene3d import _build_scene, _update_scene, _fit_camera
 from utils.plot2d import _build_kin_figures, _build_ackermann_figures, _build_opt_figures, _move_vline
 
-SCRUB_FPS = 48
+SCRUB_FPS = 60
 
 KIN_PATH = "config/kin_config.yml"
 DYN_PATH = "config/dyn_config.yml"
@@ -88,10 +88,10 @@ def main_page():
         ):
             # status bar
             with ui.row().classes("items-center gap-3 px-4 pt-2 pb-1").style("flex-shrink:0"):
-                spinner  = ui.spinner("dots", size="sm", color="emerald")
+                spinner  = ui.spinner("dots", size="sm", color="teal")
                 spinner.visible = False
                 status_lbl = ui.label("Ready — configure and press Run.").classes("text-stone-500 text-sm italic")
-                progress = ui.linear_progress(value=0).classes("flex-1 ml-2").props("instant-feedback rounded color=emerald")
+                progress = ui.linear_progress(value=0).classes("flex-1 ml-2").props("instant-feedback rounded color=teal")
                 progress.visible = False
 
             # scrollable viz body
@@ -100,7 +100,7 @@ def main_page():
 
             # playback footer
             with ui.row().classes("w-full items-center gap-3 px-4 py-2 border-t border-stone-200 bg-white").style("flex-shrink:0"):
-                play_btn = ui.button(icon="play_arrow").props("round dense unelevated color=emerald")
+                play_btn = ui.button(icon="play_arrow").props("round dense unelevated color=teal")
                 step_lbl = ui.label("—").classes("text-xs text-stone-500 font-mono")
                 play_btn.visible = False
 
@@ -289,7 +289,7 @@ def main_page():
             import os
             out_file = os.path.abspath(os.path.join(run_dir, f"HARDPOINTS_{hp_name}.xlsx"))
             with ui.row().classes("items-center gap-2 mt-1 mb-2 bg-emerald-50 p-2 rounded w-full"):
-                ui.icon("folder", color="emerald")
+                ui.icon("folder", color="teal")
                 ui.label(f"Exported to: {out_file}").classes("text-sm text-stone-700 font-mono")
                 
             ui.link("How to import this data into SolidWorks", 

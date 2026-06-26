@@ -76,7 +76,7 @@ def _build_ackermann_figures(steps):
     f  = go.Figure(data=[go.Scatter(x=xs, y=ys, mode="lines",
                                      line=dict(color=_COLORS[4], width=2))])
     f.add_hline(y=100, line_color="gray", line_dash="dash", opacity=0.4)
-    f.update_layout(**_LAYOUT_BASE, height=280,
+    f.update_layout(**{**_LAYOUT_BASE, "height": 280},
                     title="Ackermann %",
                     xaxis_title="Rack Travel [mm]",
                     yaxis_title="%",
@@ -91,7 +91,7 @@ def _build_opt_figures(F, obj_names):
                                      marker_color=_COLORS[0], opacity=0.85)])
         f.add_vline(x=float(F.min()), line_color="red", line_dash="dash",
                     annotation_text=f"Best: {F.min():.4f}")
-        f.update_layout(**_LAYOUT_BASE, height=340,
+        f.update_layout(**{**_LAYOUT_BASE, "height": 340},
                          title=f"Objective: {obj_names[0]}",
                          xaxis_title="Cost", yaxis_title="Count")
     elif n == 2:
@@ -106,7 +106,7 @@ def _build_opt_figures(F, obj_names):
                        marker=dict(size=14, symbol="star", color="red"),
                        name="Best balance"),
         ])
-        f.update_layout(**_LAYOUT_BASE, height=380,
+        f.update_layout(**{**_LAYOUT_BASE, "height": 380},
                          title="Pareto Front",
                          xaxis_title=obj_names[0], yaxis_title=obj_names[1],
                          showlegend=True)

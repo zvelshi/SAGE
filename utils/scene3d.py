@@ -22,7 +22,7 @@ def _place_cyl(cyl, p1s, p2s):
     if dot < 0.9999:
         if dot > -0.9999:
             ax = np.cross(Y, d_norm);  ax /= np.linalg.norm(ax)
-            rx, ry, rz = _Rot.from_rotvec(ax * np.arccos(dot)).as_euler('XYZ')
+            rx, ry, rz = _Rot.from_rotvec(ax * np.arccos(dot)).as_euler('xyz')
         else:
             rx, ry, rz = np.pi, 0.0, 0.0
         cyl.rotate(float(rx), float(ry), float(rz))
@@ -76,7 +76,7 @@ def _move_wheel(cyl, wc, wheel_axis):
     if dot < 0.9999:
         if dot > -0.9999:
             rot_ax = np.cross(Y, ax);  rot_ax /= np.linalg.norm(rot_ax)
-            rx, ry, rz = _Rot.from_rotvec(rot_ax * np.arccos(dot)).as_euler('XYZ')
+            rx, ry, rz = _Rot.from_rotvec(rot_ax * np.arccos(dot)).as_euler('xyz')
         else:
             rx, ry, rz = np.pi, 0.0, 0.0
         cyl.rotate(float(rx), float(ry), float(rz))
@@ -101,7 +101,7 @@ def _build_corner_objects(scene, step, hp,
         _sbe = _shock_body_end(hp.s_ib, step["s_ob"], hp.shock_min)
         # plunger = thin rod spanning full shock axis (s_ib→s_ob); body overlaps from s_ib end
         o["shock_plunger"] = _make_stick(scene, hp.s_ib, step["s_ob"], c_shock, radius=0.003)
-        o["shock_body"]    = _make_stick(scene, hp.s_ib, _sbe,         c_shock, radius=0.007)
+        o["shock_body"]    = _make_stick(scene, hp.s_ib, _sbe,         c_shock, radius=0.012)
         if "piv_ob" in step:
             o["axle_in"]  = _make_stick(scene, hp.piv_ib,     step["piv_ob"], c_axle)
             o["axle_out"] = _make_stick(scene, step["piv_ob"], step["wc"],     c_axle)
@@ -121,7 +121,7 @@ def _build_corner_objects(scene, step, hp,
         o["ucl_link"] = _make_stick(scene, hp.ucl_ib,  step["ucl_ob"], c_struct)
         o["lcl_link"] = _make_stick(scene, hp.lcl_ib,  step["lcl_ob"], c_struct)
         _sbe = _shock_body_end(hp.s_ib, step["s_ob"], hp.shock_min)
-        o["shock_body"]    = _make_stick(scene, hp.s_ib, _sbe,         c_shock, radius=0.007)
+        o["shock_body"]    = _make_stick(scene, hp.s_ib, _sbe,         c_shock, radius=0.012)
         o["shock_plunger"] = _make_stick(scene, _sbe,    step["s_ob"], c_shock, radius=0.003)
         if float(np.linalg.norm(np.asarray(step["s_ob"]) - np.asarray(_sbe))) < 1.0:
             o["shock_plunger"].move(1e6, 0.0, 0.0)
@@ -160,7 +160,7 @@ def _update_corner_objects(o, step, hp):
             _move_stick(o["axle_out"], step["piv_ob"], step["wc"])
         # shock: swap both parts every frame so rotation starts from zero each time
         _sbe = _shock_body_end(hp.s_ib, step["s_ob"], hp.shock_min)
-        _swap_stick(sc, o, "shock_body", hp.s_ib, _sbe, c_shock, radius=0.007)
+        _swap_stick(sc, o, "shock_body", hp.s_ib, _sbe, c_shock, radius=0.012)
         plunger_mm = float(np.linalg.norm(np.asarray(step["s_ob"]) - np.asarray(_sbe)))
         if plunger_mm > 1.0:
             _swap_stick(sc, o, "shock_plunger", _sbe, step["s_ob"], c_shock, radius=0.003)
@@ -185,7 +185,7 @@ def _update_corner_objects(o, step, hp):
         if "axle_out" in o and "piv_ob" in step:
             _move_stick(o["axle_out"], step["piv_ob"], step["wc"])
         _sbe = _shock_body_end(hp.s_ib, step["s_ob"], hp.shock_min)
-        _swap_stick(sc, o, "shock_body", hp.s_ib, _sbe, c_shock, radius=0.007)
+        _swap_stick(sc, o, "shock_body", hp.s_ib, _sbe, c_shock, radius=0.012)
         plunger_mm = float(np.linalg.norm(np.asarray(step["s_ob"]) - np.asarray(_sbe)))
         if plunger_mm > 1.0:
             _swap_stick(sc, o, "shock_plunger", _sbe, step["s_ob"], c_shock, radius=0.003)
