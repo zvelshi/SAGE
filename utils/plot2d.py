@@ -10,13 +10,13 @@ _LAYOUT_BASE = dict(
     plot_bgcolor="#fafafa",
 )
 
-_COLORS = ["#2563eb", "#d97706", "#059669", "#dc2626", "#7c3aed", "#0891b2"]
+_COLORS = ["#059669", "#65a30d", "#14b8a6", "#047857", "#10b981", "#84cc16"]
 
 
 def _vline_shape(x):
     return dict(type="line", x0=x, x1=x, y0=0, y1=1,
                 xref="x", yref="paper",
-                line=dict(color="rgba(220,50,50,0.8)", width=1.5, dash="dot"))
+                line=dict(color="rgba(16,185,129,0.8)", width=1.5, dash="dot"))
 
 
 def _build_kin_figures(steps):

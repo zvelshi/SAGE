@@ -50,15 +50,15 @@ def main_page():
 
     with ui.row().classes("w-full gap-0").style("height:100vh;overflow:hidden"):
 
-        with ui.column().classes("border-r border-gray-300").style(
+        with ui.column().classes("border-r border-stone-300").style(
             "width:400px;min-width:400px;height:100vh;display:flex;"
             "flex-direction:column;overflow:hidden"
         ):
-            with ui.row().classes("items-center gap-2 px-3 py-2 bg-gray-900").style("flex-shrink:0"):
-                ui.label("SAGE").classes("text-white font-bold tracking-widest")
-                ui.label("Suspension Analysis & Geometry Engine").classes("text-gray-400 text-xs")
+            with ui.row().classes("items-center gap-2 px-3 py-2 bg-stone-900").style("flex-shrink:0"):
+                ui.label("SAGE").classes("text-emerald-500 font-bold tracking-widest")
+                ui.label("Suspension Analysis & Geometry Engine").classes("text-stone-400 text-xs")
 
-            with ui.tabs().classes("w-full bg-gray-100 border-b border-gray-200").props("dense no-caps") as tabs:
+            with ui.tabs().classes("w-full bg-stone-100 border-b border-stone-200").props("dense no-caps") as tabs:
                 ui.tab("kin", label="Kinematic")
                 ui.tab("dyn", label="Dynamic")
                 ui.tab("opt", label="Optimizer")
@@ -77,21 +77,21 @@ def main_page():
 
             panels.on_value_change(lambda e: active_tab.update({"v": e.value}))
 
-            with ui.row().classes("w-full items-center gap-2 px-2 py-2 border-t border-gray-200 bg-gray-50").style("flex-shrink:0"):
+            with ui.row().classes("w-full items-center gap-2 px-2 py-2 border-t border-stone-200 bg-stone-50").style("flex-shrink:0"):
                 mode_sel    = ui.select(list(SIM_TYPES), value="kin",  label="Mode").classes("w-20").props("dense outlined")
                 subtype_sel = ui.select(SIM_TYPES["kin"], value=SIM_TYPES["kin"][0], label="Type").classes("w-36").props("dense outlined")
-                save_btn = ui.button("Save").props("unelevated dense").classes("bg-gray-700 text-white text-sm px-3")
-                run_btn  = ui.button("Run" ).props("unelevated dense").classes("bg-blue-600 text-white text-sm px-3")
+                save_btn = ui.button("Save").props("unelevated dense").classes("bg-stone-700 text-white text-sm px-3")
+                run_btn  = ui.button("Run" ).props("unelevated dense").classes("bg-emerald-600 text-white text-sm px-3")
 
         with ui.column().style(
             "flex:1;height:100vh;display:flex;flex-direction:column;overflow:hidden;background:#f8fafc"
         ):
             # status bar
             with ui.row().classes("items-center gap-3 px-4 pt-2 pb-1").style("flex-shrink:0"):
-                spinner  = ui.spinner("dots", size="sm", color="blue")
+                spinner  = ui.spinner("dots", size="sm", color="emerald")
                 spinner.visible = False
-                status_lbl = ui.label("Ready — configure and press Run.").classes("text-gray-500 text-sm italic")
-                progress = ui.linear_progress(value=0).classes("flex-1 ml-2").props("instant-feedback rounded")
+                status_lbl = ui.label("Ready — configure and press Run.").classes("text-stone-500 text-sm italic")
+                progress = ui.linear_progress(value=0).classes("flex-1 ml-2").props("instant-feedback rounded color=emerald")
                 progress.visible = False
 
             # scrollable viz body
@@ -99,9 +99,9 @@ def main_page():
                 pass
 
             # playback footer
-            with ui.row().classes("w-full items-center gap-3 px-4 py-2 border-t border-gray-200 bg-white").style("flex-shrink:0"):
-                play_btn = ui.button(icon="play_arrow").props("round dense unelevated color=blue")
-                step_lbl = ui.label("—").classes("text-xs text-gray-500 font-mono")
+            with ui.row().classes("w-full items-center gap-3 px-4 py-2 border-t border-stone-200 bg-white").style("flex-shrink:0"):
+                play_btn = ui.button(icon="play_arrow").props("round dense unelevated color=emerald")
+                step_lbl = ui.label("—").classes("text-xs text-stone-500 font-mono")
                 play_btn.visible = False
 
     # callbacks
@@ -257,10 +257,10 @@ def main_page():
 
             # 3D view
             with ui.card().classes("w-full p-0 overflow-hidden").style("flex-shrink:0"):
-                with ui.row().classes("items-center px-3 py-1 bg-gray-100 border-b border-gray-200"):
-                    ui.label("3D View").classes("text-sm font-semibold text-gray-700")
+                with ui.row().classes("items-center px-3 py-1 bg-stone-100 border-b border-stone-200"):
+                    ui.label("3D View").classes("text-sm font-semibold text-stone-700")
                     ui.label("drag to rotate · scroll to zoom · right-drag to pan"
-                             ).classes("text-xs text-gray-400 ml-2")
+                             ).classes("text-xs text-stone-400 ml-2")
                 scene3d = ui.scene(width=900, height=420,
                                    background_color="#f0f4f8").classes("w-full")
 
@@ -283,27 +283,27 @@ def main_page():
 
     def _render_extreme(data, run_dir, cfg):
         with viz_area:
-            ui.label("Extreme Points Results").classes("font-bold text-base mt-1")
+            ui.label("Extreme Points Results").classes("font-bold text-base mt-1 text-emerald-800")
             
             hp_name = cfg.get("HARDPOINTS", "UNKNOWN")
             import os
             out_file = os.path.abspath(os.path.join(run_dir, f"HARDPOINTS_{hp_name}.xlsx"))
-            with ui.row().classes("items-center gap-2 mt-1 mb-2 bg-blue-50 p-2 rounded w-full"):
-                ui.icon("folder", color="blue")
-                ui.label(f"Exported to: {out_file}").classes("text-sm text-gray-700 font-mono")
+            with ui.row().classes("items-center gap-2 mt-1 mb-2 bg-emerald-50 p-2 rounded w-full"):
+                ui.icon("folder", color="emerald")
+                ui.label(f"Exported to: {out_file}").classes("text-sm text-stone-700 font-mono")
                 
             ui.link("How to import this data into SolidWorks", 
                     "https://docs.google.com/document/d/1YMDovPIkaAoIByOL9fQeDe5OqUxFQ4b42RDFjEYWVxo/edit?usp=sharing",
-                    new_tab=True).classes("text-blue-600 text-sm underline mb-4 block")
+                    new_tab=True).classes("text-emerald-600 text-sm underline mb-4 block")
 
             for half, sides in data.items():
-                ui.label(half.upper()).classes("font-semibold text-sm mt-2 text-gray-700")
+                ui.label(half.upper()).classes("font-semibold text-sm mt-2 text-stone-700")
                 for side, conditions in sides.items():
                     for cond, steer_data in conditions.items():
                         with ui.expansion(f"{side} / {cond}",
                                           icon="expand_more").classes("w-full border rounded bg-white"):
                             for steer, pts in steer_data.items():
-                                ui.label(steer).classes("font-semibold text-xs px-2 pt-1 text-gray-600")
+                                ui.label(steer).classes("font-semibold text-xs px-2 pt-1 text-stone-600")
                                 rows = []
                                 for pt_name, val in pts.items():
                                     try:
@@ -339,11 +339,11 @@ def main_page():
             if not len(F):
                 ui.label("No feasible solutions found.").classes("text-orange-500 text-sm"); return
 
-            ui.label(f"Pareto front — {len(F)} solutions").classes("font-bold text-base")
+            ui.label(f"Pareto front — {len(F)} solutions").classes("font-bold text-base text-emerald-800")
             with ui.column().classes("gap-0.5"):
                 for i, row in enumerate(F[:10]):
                     s = ",  ".join(f"{n}: {v:.4f}" for n, v in zip(obj_names, row))
-                    ui.label(f"Sol {i:2d}:  {s}").classes("text-xs font-mono")
+                    ui.label(f"Sol {i:2d}:  {s}").classes("text-xs font-mono text-stone-600")
 
             for _, fig in _build_opt_figures(F, obj_names):
                 ui.plotly(fig).classes("w-full")
@@ -355,4 +355,4 @@ def main_page():
     run_btn.on_click(do_run)
     play_btn.on_click(do_play_pause)
 
-ui.run(title="SAGE - Suspension Analysis", port=8080, reload=False, show=True, favicon="⚙️")
+ui.run(title="SAGE - Suspension Analysis", port=8080, reload=False, show=True, favicon="🌿")
