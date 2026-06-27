@@ -1,14 +1,23 @@
+# default
 import asyncio
 import traceback
+import time
+import os
+
+# third-party
 import yaml
 import numpy as np
 from nicegui import ui, run
 
-from utils.sim_runners import _run_kin, _run_opt
-from utils.scene3d import _build_scene, _update_scene, _fit_camera
-from utils.plot2d import _build_kin_figures, _build_ackermann_figures, _build_opt_figures, _move_vline
+# ours
+from utils.sim_runners import _run_kin, _run_opt, _run_dyn
+from utils.scene3d import (_build_scene, _update_scene, _fit_camera,
+                            _build_dyn_scene, _update_dyn_scene, _fit_camera_dyn,
+                            _build_shock_dyno_scene, _update_shock_dyno_scene, _fit_camera_shock_dyno)
+from utils.plot2d import _build_kin_figures, _build_ackermann_figures, _build_opt_figures, _move_vline, _build_dyn_figures, _build_dyno_figures
 
-SCRUB_FPS = 60
+# global constants
+FPS = 60
 
 KIN_PATH = "config/kin_config.yml"
 DYN_PATH = "config/dyn_config.yml"
@@ -17,7 +26,7 @@ OPT_PATH = "config/opt_config.yml"
 TAB_PATH  = {"kin": KIN_PATH, "dyn": DYN_PATH, "opt": OPT_PATH}
 SIM_TYPES = {
     "kin": ["travel", "steer", "droop_steer", "jounce_steer", "extreme", "ackermann"],
-    "dyn": ["terrain"],
+    "dyn": ["static", "shock_dyno"],
     "opt": ["run"],
 }
 
@@ -40,7 +49,8 @@ def main_page():
         "plot_elems": [],
         "scene_objs": None,
     }
-    scrub = {"dirty": False, "idx": 0, "playing": False, "last_t": 0.0}
+    scrub    = {"dirty": False, "idx": 0, "playing": False, "last_t": 0.0}
+    dyn_prog = {"fraction": 0.0, "message": ""}
 
     ui.add_head_html("""<style>
         body,html{margin:0;padding:0;height:100vh;overflow:hidden}
@@ -58,34 +68,72 @@ def main_page():
                 ui.label("SAGE").classes("text-emerald-500 font-bold tracking-widest")
                 ui.label("Suspension Analysis & Geometry Engine").classes("text-stone-400 text-xs")
 
+            def get_hp_name():
+                if "kin" in editors:
+                    try:
+                        cfg = yaml.safe_load(editors["kin"].value)
+                        if cfg and isinstance(cfg, dict):
+                            return cfg.get("HARDPOINTS", "unknown")
+                    except Exception:
+                        pass
+                return "unknown"
+
+            def open_hp_dialog():
+                name = get_hp_name()
+                path = f"config/hardpoints/{name}.yml"
+                if os.path.exists(path):
+                    hp_editor.value = open(path).read()
+                    hp_dialog_title.text = f"{path}"
+                else:
+                    hp_editor.value = ""
+                    hp_dialog_title.text = f"{path} (Not Found)"
+                hp_dialog.open()
+
+            with ui.row().classes("w-full px-3 py-2 bg-stone-100 justify-center border-b border-stone-200"):
+                hp_button = ui.button("Hardpoints", icon="edit_document", on_click=open_hp_dialog).props("outline size=sm").classes("w-full bg-white text-stone-700 border-stone-300 shadow-sm hover:bg-stone-50")
+
+            hp_dialog = ui.dialog()
+            with hp_dialog, ui.card().style("width: 700px; height: 85vh; max-width: 100vw; display: flex; flex-direction: column; padding: 0;"):
+                with ui.row().classes("w-full px-3 py-2 bg-stone-100 border-b border-stone-200 items-center justify-between").style("flex-shrink:0"):
+                    hp_dialog_title = ui.label("Hardpoints YAML").classes("font-bold text-sm text-stone-700")
+                    ui.button(icon="close", on_click=hp_dialog.close).props("flat dense round size=sm").classes("text-stone-500")
+                
+                hp_editor = ui.codemirror(language="yaml", theme="githubLight").style("flex:1; min-height: 0; font-size: 12px;")
+                
+                with ui.row().classes("w-full px-3 py-2 bg-stone-50 border-t border-stone-200 justify-end gap-2").style("flex-shrink:0"):
+                    ui.button("Cancel", on_click=hp_dialog.close).props("flat dense").classes("text-stone-600 px-3")
+                    def save_hp():
+                        name = get_hp_name()
+                        path = f"config/hardpoints/{name}.yml"
+                        try:
+                            yaml.safe_load(hp_editor.value)
+                            open(path, "w").write(hp_editor.value)
+                            ui.notify(f"Saved -> {path}", type="positive", position="bottom-right")
+                            hp_dialog.close()
+                        except yaml.YAMLError as exc:
+                            ui.notify(f"YAML error: {exc}", type="negative")
+                    ui.button("Save", on_click=save_hp).props("unelevated dense").classes("bg-emerald-600 text-white px-3")
+
             with ui.tabs().classes("w-full bg-stone-100 border-b border-stone-200").props("dense no-caps") as tabs:
                 ui.tab("kin", label="Kinematic")
                 ui.tab("dyn", label="Dynamic")
                 ui.tab("opt", label="Optimizer")
 
-            with ui.tab_panels(tabs, value="kin").style(
-                "flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden"
-            ) as panels:
+            with ui.tab_panels(tabs, value="kin").style("flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden") as panels:
                 for tab_name, path in TAB_PATH.items():
-                    with ui.tab_panel(tab_name).style(
-                        "height:100%;padding:0;display:flex;flex-direction:column;overflow:hidden"
-                    ):
-                        ed = ui.codemirror(value=open(path).read(), language="yaml",
-                                           theme="githubLight"
-                                           ).style("flex:1;min-height:0;font-size:12px")
+                    with ui.tab_panel(tab_name).style("height:100%;padding:0;display:flex;flex-direction:column;overflow:hidden"):
+                        ed = ui.codemirror(value=open(path).read(), language="yaml", theme="githubLight").style("flex:1;min-height:0;font-size:12px")
                         editors[tab_name] = ed
 
             panels.on_value_change(lambda e: active_tab.update({"v": e.value}))
 
             with ui.row().classes("w-full items-center gap-2 px-2 py-2 border-t border-stone-200 bg-stone-50").style("flex-shrink:0"):
-                mode_sel    = ui.select(list(SIM_TYPES), value="kin",  label="Mode").classes("w-20").props("dense outlined")
+                mode_sel = ui.select(list(SIM_TYPES), value="kin",  label="Mode").classes("w-20").props("dense outlined")
                 subtype_sel = ui.select(SIM_TYPES["kin"], value=SIM_TYPES["kin"][0], label="Type").classes("w-36").props("dense outlined")
                 save_btn = ui.button("Save").props("unelevated dense").classes("bg-stone-700 text-white text-sm px-3")
                 run_btn  = ui.button("Run" ).props("unelevated dense").classes("bg-emerald-600 text-white text-sm px-3")
 
-        with ui.column().style(
-            "flex:1;height:100vh;display:flex;flex-direction:column;overflow:hidden;background:#f8fafc"
-        ):
+        with ui.column().style("flex:1;height:100vh;display:flex;flex-direction:column;overflow:hidden;background:#f8fafc"):
             # status bar
             with ui.row().classes("items-center gap-3 px-4 pt-2 pb-1").style("flex-shrink:0"):
                 spinner  = ui.spinner("dots", size="sm", color="teal")
@@ -125,7 +173,9 @@ def main_page():
         except yaml.YAMLError as exc:
             ui.notify(f"YAML error: {exc}", type="negative"); return
         open(path, "w").write(text)
-        ui.notify(f"Saved → {path}", type="positive", position="bottom-right")
+        ui.notify(f"Saved -> {path}", type="positive", position="bottom-right")
+        if tab == "kin":
+            hp_button.text = f"Hardpoints: '{get_hp_name()}'"
 
     async def do_run():
         mode, sim_type = mode_ref["v"], type_ref["v"]
@@ -140,6 +190,7 @@ def main_page():
         viz_area.clear()
         cache["named_figs"].clear(); cache["plot_elems"].clear()
         cache["steps"] = []; cache["scene_objs"] = None
+        cache["xs"] = []
 
         try:
             if mode == "kin":
@@ -155,8 +206,14 @@ def main_page():
                 _render_opt(result)
 
             elif mode == "dyn":
-                with viz_area:
-                    ui.label("Dynamic simulation not yet supported in web UI.").classes("text-orange-500 text-sm")
+                dyn_prog["fraction"] = 0.0
+                dyn_prog["message"]  = "Initializing..."
+                dyn_poll_timer.active = True
+                result = await run.io_bound(_run_dyn, editors["kin"].value, editors["dyn"].value, sim_type, dyn_prog)
+                dyn_poll_timer.active = False
+                progress.set_value(0.95)
+                await asyncio.sleep(0)
+                _render_dyn(result)
 
             progress.set_value(1.0)
             status_lbl.text = f"Done — {mode} / {sim_type}  ({len(cache['steps'])} steps)"
@@ -179,9 +236,7 @@ def main_page():
         scrub["playing"] = not scrub["playing"]
         play_btn.props(f'icon={"pause" if scrub["playing"] else "play_arrow"}')
 
-
     async def _apply_scrub():
-        import time
         steps = cache["steps"]
         if not steps:
             return
@@ -189,7 +244,7 @@ def main_page():
         # auto-advance when playing
         if scrub["playing"]:
             now = time.monotonic()
-            if now - scrub["last_t"] >= 1.0 / SCRUB_FPS:
+            if now - scrub["last_t"] >= 1.0 / FPS:
                 scrub["last_t"] = now
                 nxt = scrub["idx"] + 1
                 if nxt >= len(steps):
@@ -210,25 +265,36 @@ def main_page():
 
         so = cache["scene_objs"]
         if so is not None:
-            _update_scene(so, steps[idx], cache["sim_type"],
-                          cache["vehicle"], cache["hp"])
+            if cache["sim_type"] == "static":
+                _update_dyn_scene(so, steps[idx], cache["vehicle"])
+            elif cache["sim_type"] == "shock_dyno":
+                _update_shock_dyno_scene(so, steps[idx])
+            else:
+                _update_scene(so, steps[idx], cache["sim_type"], cache["vehicle"], cache["hp"])
 
-        await asyncio.sleep(0)   # yield so UI events can be processed
+        await asyncio.sleep(0) # yield so UI events can be processed
 
         for (_, fig), pel in zip(cache["named_figs"], cache["plot_elems"]):
             if xs:
                 _move_vline(fig, xs[idx])
             pel.update()
 
-    ui.timer(1.0 / (SCRUB_FPS * 2), _apply_scrub)   # 2× SCRUB_FPS polling
+    ui.timer(1.0 / (FPS * 2), _apply_scrub)
+
+    def _poll_dyn_progress():
+        progress.set_value(dyn_prog["fraction"])
+        if dyn_prog["message"]:
+            status_lbl.text = dyn_prog["message"]
+
+    dyn_poll_timer = ui.timer(0.25, _poll_dyn_progress, active=False)
 
     # result renderers 
     def _setup_scrubber(n):
         play_btn.props("icon=play_arrow")
         play_btn.visible = True
-        step_lbl.text    = f"Step 1 / {n}"
-        scrub["idx"]     = 0
-        scrub["dirty"]   = False
+        step_lbl.text = f"Step 1 / {n}"
+        scrub["idx"] = 0
+        scrub["dirty"] = False
         scrub["playing"] = False
 
     def _render_kin(result):
@@ -242,27 +308,24 @@ def main_page():
                 _render_extreme(steps, run_dir, cfg); return
 
             corner = vehicle.get_corner_from_id(corner_id)
-            hp     = corner.hardpoints
+            hp = corner.hardpoints
 
-            cache.update(steps=steps, sim_type=sim_type,
-                         vehicle=vehicle, hp=hp)
+            cache.update(steps=steps, sim_type=sim_type, vehicle=vehicle, hp=hp)
 
             if sim_type == "ackermann":
                 named_figs, xs = _build_ackermann_figures(steps)
             else:
                 named_figs, xs = _build_kin_figures(steps)
 
-            cache["xs"]         = xs
+            cache["xs"] = xs
             cache["named_figs"] = named_figs
 
             # 3D view
             with ui.card().classes("w-full p-0 overflow-hidden").style("flex-shrink:0"):
                 with ui.row().classes("items-center px-3 py-1 bg-stone-100 border-b border-stone-200"):
                     ui.label("3D View").classes("text-sm font-semibold text-stone-700")
-                    ui.label("drag to rotate · scroll to zoom · right-drag to pan"
-                             ).classes("text-xs text-stone-400 ml-2")
-                scene3d = ui.scene(width=900, height=420,
-                                   background_color="#f0f4f8").classes("w-full")
+                    ui.label("drag to rotate · scroll to zoom · right-drag to pan").classes("text-xs text-stone-400 ml-2")
+                scene3d = ui.scene(width=900, height=420,background_color="#f0f4f8", grid=(10, 100)).classes("w-full")
 
             # build objects on last step (widest extent) for camera fit, then update to step 0
             scene_objs = _build_scene(scene3d, steps[-1], sim_type, vehicle, hp)
@@ -286,32 +349,25 @@ def main_page():
             ui.label("Extreme Points Results").classes("font-bold text-base mt-1 text-emerald-800")
             
             hp_name = cfg.get("HARDPOINTS", "UNKNOWN")
-            import os
             out_file = os.path.abspath(os.path.join(run_dir, f"HARDPOINTS_{hp_name}.xlsx"))
             with ui.row().classes("items-center gap-2 mt-1 mb-2 bg-emerald-50 p-2 rounded w-full"):
                 ui.icon("folder", color="teal")
                 ui.label(f"Exported to: {out_file}").classes("text-sm text-stone-700 font-mono")
                 
-            ui.link("How to import this data into SolidWorks", 
-                    "https://docs.google.com/document/d/1YMDovPIkaAoIByOL9fQeDe5OqUxFQ4b42RDFjEYWVxo/edit?usp=sharing",
-                    new_tab=True).classes("text-emerald-600 text-sm underline mb-4 block")
+            ui.link("How to import this data into SolidWorks", "https://docs.google.com/document/d/1YMDovPIkaAoIByOL9fQeDe5OqUxFQ4b42RDFjEYWVxo/edit?usp=sharing", new_tab=True).classes("text-emerald-600 text-sm underline mb-4 block")
 
             for half, sides in data.items():
                 ui.label(half.upper()).classes("font-semibold text-sm mt-2 text-stone-700")
                 for side, conditions in sides.items():
                     for cond, steer_data in conditions.items():
-                        with ui.expansion(f"{side} / {cond}",
-                                          icon="expand_more").classes("w-full border rounded bg-white"):
+                        with ui.expansion(f"{side} / {cond}", icon="expand_more").classes("w-full border rounded bg-white"):
                             for steer, pts in steer_data.items():
                                 ui.label(steer).classes("font-semibold text-xs px-2 pt-1 text-stone-600")
                                 rows = []
                                 for pt_name, val in pts.items():
                                     try:
                                         v = list(val)
-                                        rows.append({"point": pt_name,
-                                                     "x": f"{v[0]:.3f}",
-                                                     "y": f"{v[1]:.3f}",
-                                                     "z": f"{v[2]:.3f}"})
+                                        rows.append({"point": pt_name, "x": f"{v[0]:.3f}", "y": f"{v[1]:.3f}", "z": f"{v[2]:.3f}" })
                                     except Exception:
                                         pass
                                 if rows:
@@ -324,6 +380,69 @@ def main_page():
                                         ],
                                         rows=rows,
                                     ).classes("text-xs w-full").props("dense flat")
+
+    def _render_dyn(result):
+        if len(result) == 4:
+            steps, vehicle, run_dir, dyn_cfg = result
+        else:
+            steps, vehicle, run_dir = result
+            dyn_cfg = {"SIMULATION": "static"}
+
+        sim_type = dyn_cfg.get("SIMULATION", "static")
+
+        with viz_area:
+            if not steps:
+                ui.label("No simulation frames returned.").classes("text-red-500 text-sm"); return
+
+            cache.update(steps=steps, sim_type=sim_type, vehicle=vehicle, hp=None)
+            
+            if sim_type == "shock_dyno":
+                out_file = os.path.abspath(os.path.join(run_dir, "shock_dyno_results.csv"))
+                with ui.row().classes("items-center gap-2 mt-1 mb-2 bg-emerald-50 p-2 rounded w-full"):
+                    ui.icon("folder", color="teal")
+                    ui.label(f"Dyno Results Exported to: {out_file}").classes("text-sm text-stone-700 font-mono")
+
+            with ui.card().classes("w-full p-0 overflow-hidden").style("flex-shrink:0"):
+                with ui.row().classes("items-center px-3 py-1 bg-stone-100 border-b border-stone-200"):
+                    if sim_type == "shock_dyno":
+                        ui.label("3D View — Isolated Shock").classes("text-sm font-semibold text-stone-700")
+                    else:
+                        ui.label("3D View — Full Vehicle Drop").classes("text-sm font-semibold text-stone-700")
+
+                    ui.label("drag to rotate · scroll to zoom · right-drag to pan").classes("text-xs text-stone-400 ml-2")
+
+                    if sim_type != "shock_dyno":
+                        ui.label("● hoist  ● drop  ● settled").classes("text-xs text-stone-400 ml-auto")
+                scene3d = ui.scene(width=900, height=500, background_color="#f0f4f8", grid=(10, 100)).classes("w-full")
+
+            if sim_type == "shock_dyno":
+                scene_objs = _build_shock_dyno_scene(scene3d, steps[-1])
+                _fit_camera_shock_dyno(scene3d, steps[-1])
+                _update_shock_dyno_scene(scene_objs, steps[0])
+            else:
+                scene_objs = _build_dyn_scene(scene3d, steps[-1], vehicle)
+                _fit_camera_dyn(scene3d, steps[-1], vehicle)
+                _update_dyn_scene(scene_objs, steps[0], vehicle)
+                
+            cache["scene_objs"] = scene_objs
+
+            if sim_type == "shock_dyno":
+                named_figs, xs = _build_dyno_figures(steps)
+            else:
+                named_figs, xs = _build_dyn_figures(steps)
+                
+            cache["xs"] = xs
+            cache["named_figs"] = named_figs
+
+            ncols = 1 if sim_type == "shock_dyno" else (3 if len(named_figs) >= 3 else len(named_figs))
+            with ui.grid(columns=ncols).classes("w-full gap-2 mt-2"):
+                plot_elems = []
+                for _, fig in named_figs:
+                    pel = ui.plotly(fig).classes("w-full")
+                    plot_elems.append(pel)
+            cache["plot_elems"] = plot_elems
+
+            _setup_scrubber(len(steps))
 
     def _render_opt(result):
         res, optimizer, cfg, run_dir = result
@@ -354,5 +473,13 @@ def main_page():
     save_btn.on_click(do_save)
     run_btn.on_click(do_run)
     play_btn.on_click(do_play_pause)
+
+    # initialize button text
+    try:
+        cfg = yaml.safe_load(open(KIN_PATH).read())
+        if cfg and isinstance(cfg, dict):
+            hp_button.text = f"EDIT HARDPOINTS"
+    except Exception:
+        pass
 
 ui.run(title="SAGE - Suspension Analysis", port=8080, reload=False, show=True, favicon="🌿")

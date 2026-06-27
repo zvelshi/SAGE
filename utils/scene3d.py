@@ -1,14 +1,26 @@
+# third-party
 import numpy as np
 from scipy.spatial.transform import Rotation as _Rot
+
+# ours
 from models.hardpoints import DoubleAArm, SemiTrailingLink
 
-_S = 1.0 / 1000.0   # mm → scene units
+# constants
+_S = 1.0 / 1000.0 # mm -> scene units
 
-def _v(arr):
+_DYN_CORNERS = [
+    ("fl", "front_left",  "#003cb4", "#b42800"),
+    ("fr", "front_right", "#b42800", "#003cb4"),
+    ("rl", "rear_left",   "#1a6e1a", "#6e1a1a"),
+    ("rr", "rear_right",  "#6e1a1a", "#1a6e1a"),
+]
+
+def _v(arr: np.ndarray | list[float]) -> list[float]:
+    """Convert mm to scene units."""
     return [float(arr[0]) * _S, float(arr[1]) * _S, float(arr[2]) * _S]
 
-def _place_cyl(cyl, p1s, p2s):
-    """Move + rotate an existing cylinder to span p1→p2 (scene units).
+def _place_cyl(cyl, p1s: np.ndarray, p2s: np.ndarray):
+    """Move + rotate an existing cylinder to span p1->p2 (scene units).
     The cylinder must already have the correct height baked into its geometry."""
     d = p2s - p1s
     L = float(np.linalg.norm(d))
@@ -42,11 +54,23 @@ def _move_stick(cyl, p1, p2):
     """Reposition a FIXED-LENGTH stick (height geometry unchanged, only move+rotate)."""
     _place_cyl(cyl, np.asarray(p1, float) * _S, np.asarray(p2, float) * _S)
 
-def _swap_stick(scene, o, key, p1, p2, color, radius=0.004):
-    """For VARIABLE-LENGTH sticks: park old cylinder off-screen, create fresh one."""
-    o[key].move(1e6, 0.0, 0.0)   # hide old (no per-object removal in NiceGUI)
-    with scene:
-        o[key] = _make_stick(scene, p1, p2, color, radius)
+def _make_variable_stick(scene, p1, p2, color, radius=0.004):
+    """Create a cylinder with height=1.0 and scale its length to fit p1->p2."""
+    p1s = np.asarray(p1, float) * _S
+    p2s = np.asarray(p2, float) * _S
+    L   = max(float(np.linalg.norm(p2s - p1s)), 1e-9)
+    cyl = scene.cylinder(top_radius=radius, bottom_radius=radius, height=1.0).material(color)
+    cyl.scale(1.0, L, 1.0)
+    _place_cyl(cyl, p1s, p2s)
+    return cyl
+
+def _move_variable_stick(cyl, p1, p2):
+    """Dynamically scale and rotate an existing variable-length stick."""
+    p1s = np.asarray(p1, float) * _S
+    p2s = np.asarray(p2, float) * _S
+    L   = max(float(np.linalg.norm(p2s - p1s)), 1e-9)
+    cyl.scale(1.0, L, 1.0)
+    _place_cyl(cyl, p1s, p2s)
 
 def _shock_body_end(s_ib, s_ob, shock_min_mm):
     """Return the outboard end of the shock body (fixed length = shock_min_mm, in mm)."""
@@ -91,45 +115,56 @@ def _build_corner_objects(scene, step, hp,
     ax_default = np.array([0., 1., 0.])
 
     if isinstance(hp, DoubleAArm):
-        ubj = np.asarray(step["ubj"]);  lbj = np.asarray(step["lbj"])
-        o["uf_arm"]  = _make_stick(scene, hp.uf,  ubj, c_struct)
-        o["ur_arm"]  = _make_stick(scene, hp.ur,  ubj, c_struct)
-        o["lf_arm"]  = _make_stick(scene, hp.lf,  lbj, c_struct)
-        o["lr_arm"]  = _make_stick(scene, hp.lr,  lbj, c_struct)
-        o["upright"] = _make_stick(scene, lbj,    ubj, c_struct)
-        o["tierod"]  = _make_stick(scene, step["tr_ib"], step["tr_ob"], c_tie)
-        _sbe = _shock_body_end(hp.s_ib, step["s_ob"], hp.shock_min)
-        # plunger = thin rod spanning full shock axis (s_ib→s_ob); body overlaps from s_ib end
-        o["shock_plunger"] = _make_stick(scene, hp.s_ib, step["s_ob"], c_shock, radius=0.003)
-        o["shock_body"]    = _make_stick(scene, hp.s_ib, _sbe,         c_shock, radius=0.012)
+        ubj    = np.asarray(step["ubj"]);  lbj = np.asarray(step["lbj"])
+        uf     = np.asarray(step.get("uf",     hp.uf))
+        ur     = np.asarray(step.get("ur",     hp.ur))
+        lf     = np.asarray(step.get("lf",     hp.lf))
+        lr     = np.asarray(step.get("lr",     hp.lr))
+        s_ib   = np.asarray(step.get("s_ib",   hp.s_ib))
+        piv_ib = np.asarray(step.get("piv_ib", hp.piv_ib))
+        tr_ib  = np.asarray(step.get("tr_ib",  hp.tr_ib))
+        o["uf_arm"]  = _make_stick(scene, uf,  ubj, c_struct)
+        o["ur_arm"]  = _make_stick(scene, ur,  ubj, c_struct)
+        o["lf_arm"]  = _make_stick(scene, lf,  lbj, c_struct)
+        o["lr_arm"]  = _make_stick(scene, lr,  lbj, c_struct)
+        o["upright"] = _make_stick(scene, lbj, ubj, c_struct)
+        o["tierod"]  = _make_stick(scene, tr_ib, step["tr_ob"], c_tie)
+        _sbe = _shock_body_end(s_ib, step["s_ob"], hp.shock_min)
+        o["shock_plunger"] = _make_variable_stick(scene, s_ib, step["s_ob"], c_shock, radius=0.003)
+        o["shock_body"]    = _make_stick(scene, s_ib, _sbe,         c_shock, radius=0.012)
         if "piv_ob" in step:
-            o["axle_in"]  = _make_stick(scene, hp.piv_ib,     step["piv_ob"], c_axle)
+            o["axle_in"]  = _make_variable_stick(scene, piv_ib,        step["piv_ob"], c_axle)
             o["axle_out"] = _make_stick(scene, step["piv_ob"], step["wc"],     c_axle)
-        for k, pt in [("sp_uf", hp.uf), ("sp_ur", hp.ur), ("sp_lf", hp.lf),
-                      ("sp_lr", hp.lr), ("sp_s_ib", hp.s_ib)]:
+        for k, pt in [("sp_uf", uf), ("sp_ur", ur), ("sp_lf", lf),
+                      ("sp_lr", lr), ("sp_s_ib", s_ib)]:
             o[k] = scene.sphere(radius=0.010).material("#222222").move(*_v(pt))
         for k, pt in [("sp_ubj", ubj), ("sp_lbj", lbj),
-                      ("sp_tr_ib", step["tr_ib"]), ("sp_tr_ob", step["tr_ob"]),
+                      ("sp_tr_ib", tr_ib), ("sp_tr_ob", step["tr_ob"]),
                       ("sp_s_ob", step["s_ob"])]:
             o[k] = scene.sphere(radius=0.010).material("#222222").move(*_v(pt))
         o["wheel"] = _make_wheel(scene, step["wc"], step.get("wheel_axis", ax_default), hp.wr, hp.ww)
         o["sp_wc"] = scene.sphere(radius=0.014).material("#4466bb").move(*_v(step["wc"]))
 
     elif isinstance(hp, SemiTrailingLink):
-        o["tl_f_ucl"] = _make_stick(scene, hp.tl_f,   step["ucl_ob"], c_struct)
-        o["tl_f_lcl"] = _make_stick(scene, hp.tl_f,   step["lcl_ob"], c_struct)
-        o["ucl_link"] = _make_stick(scene, hp.ucl_ib,  step["ucl_ob"], c_struct)
-        o["lcl_link"] = _make_stick(scene, hp.lcl_ib,  step["lcl_ob"], c_struct)
-        _sbe = _shock_body_end(hp.s_ib, step["s_ob"], hp.shock_min)
-        o["shock_body"]    = _make_stick(scene, hp.s_ib, _sbe,         c_shock, radius=0.012)
-        o["shock_plunger"] = _make_stick(scene, _sbe,    step["s_ob"], c_shock, radius=0.003)
+        tl_f   = np.asarray(step.get("tl_f",   hp.tl_f))
+        ucl_ib = np.asarray(step.get("ucl_ib", hp.ucl_ib))
+        lcl_ib = np.asarray(step.get("lcl_ib", hp.lcl_ib))
+        s_ib   = np.asarray(step.get("s_ib",   hp.s_ib))
+        piv_ib = np.asarray(step.get("piv_ib", hp.piv_ib))
+        o["tl_f_ucl"] = _make_stick(scene, tl_f,   step["ucl_ob"], c_struct)
+        o["tl_f_lcl"] = _make_stick(scene, tl_f,   step["lcl_ob"], c_struct)
+        o["ucl_link"] = _make_stick(scene, ucl_ib, step["ucl_ob"], c_struct)
+        o["lcl_link"] = _make_stick(scene, lcl_ib, step["lcl_ob"], c_struct)
+        _sbe = _shock_body_end(s_ib, step["s_ob"], hp.shock_min)
+        o["shock_body"]    = _make_stick(scene, s_ib, _sbe,         c_shock, radius=0.012)
+        o["shock_plunger"] = _make_variable_stick(scene, _sbe, step["s_ob"], c_shock, radius=0.003)
         if float(np.linalg.norm(np.asarray(step["s_ob"]) - np.asarray(_sbe))) < 1.0:
-            o["shock_plunger"].move(1e6, 0.0, 0.0)
+            o["shock_plunger"].scale(1.0, 1e-6, 1.0)
         if "piv_ob" in step:
-            o["axle_in"]  = _make_stick(scene, hp.piv_ib,     step["piv_ob"], c_axle)
+            o["axle_in"]  = _make_variable_stick(scene, piv_ib,        step["piv_ob"], c_axle)
             o["axle_out"] = _make_stick(scene, step["piv_ob"], step["wc"],     c_axle)
-        for k, pt in [("sp_tl_f", hp.tl_f), ("sp_ucl_ib", hp.ucl_ib),
-                      ("sp_lcl_ib", hp.lcl_ib), ("sp_s_ib", hp.s_ib)]:
+        for k, pt in [("sp_tl_f", tl_f), ("sp_ucl_ib", ucl_ib),
+                      ("sp_lcl_ib", lcl_ib), ("sp_s_ib", s_ib)]:
             o[k] = scene.sphere(radius=0.010).material("#222222").move(*_v(pt))
         for k, pt in [("sp_ucl_ob", step["ucl_ob"]), ("sp_lcl_ob", step["lcl_ob"]),
                       ("sp_s_ob", step["s_ob"])]:
@@ -148,51 +183,65 @@ def _update_corner_objects(o, step, hp):
     ax_default = np.array([0., 1., 0.])
 
     if isinstance(hp, DoubleAArm):
-        ubj = np.asarray(step["ubj"]);  lbj = np.asarray(step["lbj"])
-        # fixed-length: a-arms, upright, tie rod, axle_out — only move+rotate
-        _move_stick(o["uf_arm"],  hp.uf, ubj)
-        _move_stick(o["ur_arm"],  hp.ur, ubj)
-        _move_stick(o["lf_arm"],  hp.lf, lbj)
-        _move_stick(o["lr_arm"],  hp.lr, lbj)
-        _move_stick(o["upright"], lbj,   ubj)
-        _move_stick(o["tierod"],  step["tr_ib"], step["tr_ob"])
+        ubj    = np.asarray(step["ubj"]);  lbj = np.asarray(step["lbj"])
+        uf     = np.asarray(step.get("uf",     hp.uf))
+        ur     = np.asarray(step.get("ur",     hp.ur))
+        lf     = np.asarray(step.get("lf",     hp.lf))
+        lr     = np.asarray(step.get("lr",     hp.lr))
+        s_ib   = np.asarray(step.get("s_ib",   hp.s_ib))
+        piv_ib = np.asarray(step.get("piv_ib", hp.piv_ib))
+        tr_ib  = np.asarray(step.get("tr_ib",  hp.tr_ib))
+        _move_stick(o["uf_arm"],  uf, ubj)
+        _move_stick(o["ur_arm"],  ur, ubj)
+        _move_stick(o["lf_arm"],  lf, lbj)
+        _move_stick(o["lr_arm"],  lr, lbj)
+        _move_stick(o["upright"], lbj, ubj)
+        _move_stick(o["tierod"],  tr_ib, step["tr_ob"])
         if "axle_out" in o and "piv_ob" in step:
             _move_stick(o["axle_out"], step["piv_ob"], step["wc"])
-        # shock: swap both parts every frame so rotation starts from zero each time
-        _sbe = _shock_body_end(hp.s_ib, step["s_ob"], hp.shock_min)
-        _swap_stick(sc, o, "shock_body", hp.s_ib, _sbe, c_shock, radius=0.012)
+        _sbe = _shock_body_end(s_ib, step["s_ob"], hp.shock_min)
+        _move_stick(o["shock_body"], s_ib, _sbe)
         plunger_mm = float(np.linalg.norm(np.asarray(step["s_ob"]) - np.asarray(_sbe)))
         if plunger_mm > 1.0:
-            _swap_stick(sc, o, "shock_plunger", _sbe, step["s_ob"], c_shock, radius=0.003)
+            _move_variable_stick(o["shock_plunger"], _sbe, step["s_ob"])
         else:
-            o["shock_plunger"].move(1e6, 0.0, 0.0)
-        # axle_in: variable length → swap
+            o["shock_plunger"].scale(1.0, 1e-6, 1.0)
         if "axle_in" in o and "piv_ob" in step:
-            _swap_stick(sc, o, "axle_in", hp.piv_ib, step["piv_ob"], c_axle)
-        # sphere updates
+            _move_variable_stick(o["axle_in"], piv_ib, step["piv_ob"])
+        o["sp_uf"].move(*_v(uf));  o["sp_ur"].move(*_v(ur))
+        o["sp_lf"].move(*_v(lf));  o["sp_lr"].move(*_v(lr))
+        o["sp_s_ib"].move(*_v(s_ib))
         o["sp_ubj"].move(*_v(ubj));  o["sp_lbj"].move(*_v(lbj))
-        o["sp_tr_ib"].move(*_v(step["tr_ib"]))
+        o["sp_tr_ib"].move(*_v(tr_ib))
         o["sp_tr_ob"].move(*_v(step["tr_ob"]))
         o["sp_s_ob"].move(*_v(step["s_ob"]))
         _move_wheel(o["wheel"], step["wc"], step.get("wheel_axis", ax_default))
         o["sp_wc"].move(*_v(step["wc"]))
 
     elif isinstance(hp, SemiTrailingLink):
-        _move_stick(o["tl_f_ucl"], hp.tl_f,  step["ucl_ob"])
-        _move_stick(o["tl_f_lcl"], hp.tl_f,  step["lcl_ob"])
-        _move_stick(o["ucl_link"], hp.ucl_ib, step["ucl_ob"])
-        _move_stick(o["lcl_link"], hp.lcl_ib, step["lcl_ob"])
+        tl_f   = np.asarray(step.get("tl_f",   hp.tl_f))
+        ucl_ib = np.asarray(step.get("ucl_ib", hp.ucl_ib))
+        lcl_ib = np.asarray(step.get("lcl_ib", hp.lcl_ib))
+        s_ib   = np.asarray(step.get("s_ib",   hp.s_ib))
+        piv_ib = np.asarray(step.get("piv_ib", hp.piv_ib))
+        _move_stick(o["tl_f_ucl"], tl_f,   step["ucl_ob"])
+        _move_stick(o["tl_f_lcl"], tl_f,   step["lcl_ob"])
+        _move_stick(o["ucl_link"], ucl_ib, step["ucl_ob"])
+        _move_stick(o["lcl_link"], lcl_ib, step["lcl_ob"])
         if "axle_out" in o and "piv_ob" in step:
             _move_stick(o["axle_out"], step["piv_ob"], step["wc"])
-        _sbe = _shock_body_end(hp.s_ib, step["s_ob"], hp.shock_min)
-        _swap_stick(sc, o, "shock_body", hp.s_ib, _sbe, c_shock, radius=0.012)
+        _sbe = _shock_body_end(s_ib, step["s_ob"], hp.shock_min)
+        _move_stick(o["shock_body"], s_ib, _sbe)
         plunger_mm = float(np.linalg.norm(np.asarray(step["s_ob"]) - np.asarray(_sbe)))
         if plunger_mm > 1.0:
-            _swap_stick(sc, o, "shock_plunger", _sbe, step["s_ob"], c_shock, radius=0.003)
+            _move_variable_stick(o["shock_plunger"], _sbe, step["s_ob"])
         else:
-            o["shock_plunger"].move(1e6, 0.0, 0.0)
+            o["shock_plunger"].scale(1.0, 1e-6, 1.0)
         if "axle_in" in o and "piv_ob" in step:
-            _swap_stick(sc, o, "axle_in", hp.piv_ib, step["piv_ob"], c_axle)
+            _move_variable_stick(o["axle_in"], piv_ib, step["piv_ob"])
+        o["sp_tl_f"].move(*_v(tl_f))
+        o["sp_ucl_ib"].move(*_v(ucl_ib));  o["sp_lcl_ib"].move(*_v(lcl_ib))
+        o["sp_s_ib"].move(*_v(s_ib))
         o["sp_ucl_ob"].move(*_v(step["ucl_ob"]))
         o["sp_lcl_ob"].move(*_v(step["lcl_ob"]))
         o["sp_s_ob"].move(*_v(step["s_ob"]))
@@ -227,6 +276,119 @@ def _update_scene(scene_objs, step, sim_type, vehicle, hp):
                                    vehicle.front_right.hardpoints)
     else:
         _update_corner_objects(scene_objs, step, hp)
+
+def _cog_color(phase: str) -> str:
+    if phase == "hoist":
+        return "#ff6600"
+    if phase == "settled":
+        return "#00cc44"
+    return "#ffcc00"
+
+def _build_dyn_scene(scene, step, vehicle) -> dict:
+    """Build all 4 corners + CoG sphere for the dynamic drop scenario."""
+    objs: dict = {}
+    with scene:
+        for key, attr, c_struct, _ in _DYN_CORNERS:
+            corner = getattr(vehicle, attr)
+            if step.get(key) is not None:
+                objs[key] = _build_corner_objects(scene, step[key], corner.hardpoints,
+                                                   c_struct=c_struct)
+        cog = step["cog_pos"]
+        objs["cog"] = (
+            scene.sphere(radius=0.05)
+            .material(_cog_color(step.get("phase", "drop")))
+            .move(*_v(cog))
+        )
+    return objs
+
+def _build_shock_dyno_scene(scene, step) -> dict:
+    """Build an isolated shock for the shock dyno."""
+    objs = {"_scene": scene}
+    
+    # Position upper point 200mm above its own length
+    z_fixed = step.get("shock_max", 500.0) + 200.0
+    s_ib = np.array([0, 0, z_fixed])
+    s_ob = np.array([0, 0, z_fixed - step["shock_len"]])
+    shock_min = step.get("shock_min", 200.0)
+    _sbe = _shock_body_end(s_ib, s_ob, shock_min)
+    
+    c_shock = "#6e6e82"
+    with scene:
+        objs["shock_body"]    = _make_stick(scene, s_ib, _sbe, c_shock, radius=0.012)
+        objs["shock_plunger"] = _make_variable_stick(scene, _sbe, s_ob, c_shock, radius=0.003)
+        objs["sp_s_ib"] = scene.sphere(radius=0.010).material("#222222").move(*_v(s_ib))
+        objs["sp_s_ob"] = scene.sphere(radius=0.010).material("#222222").move(*_v(s_ob))
+        
+    return objs
+
+def _update_shock_dyno_scene(objs: dict, step) -> None:
+    z_fixed = step.get("shock_max", 500.0) + 200.0
+    s_ib = np.array([0, 0, z_fixed])
+    s_ob = np.array([0, 0, z_fixed - step["shock_len"]])
+    shock_min = step.get("shock_min", 200.0)
+    _sbe = _shock_body_end(s_ib, s_ob, shock_min)
+    
+    _move_stick(objs["shock_body"], s_ib, _sbe)
+    _move_variable_stick(objs["shock_plunger"], _sbe, s_ob)
+    objs["sp_s_ib"].move(*_v(s_ib))
+    objs["sp_s_ob"].move(*_v(s_ob))
+
+def _fit_camera_shock_dyno(scene, step) -> None:
+    z_fixed = step.get("shock_max", 500.0) + 200.0
+    z_center = (z_fixed + (z_fixed - step["shock_len"])) / 2.0 * _S
+    slen = float(step["shock_max"]) * _S
+    scene.move_camera(
+        x=slen * 1.5,
+        y=slen * 1.5,
+        z=z_center + slen * 0.5,
+        look_at_x=0, look_at_y=0, look_at_z=z_center,
+        up_x=0, up_y=0, up_z=1
+    )
+
+def _update_dyn_scene(objs: dict, step, vehicle) -> None:
+    """Update all 4 corners and CoG sphere in-place."""
+    for key, attr, _, _ in _DYN_CORNERS:
+        corner = getattr(vehicle, attr)
+        if key in objs and step.get(key) is not None:
+            _update_corner_objects(objs[key], step[key], corner.hardpoints)
+    if "cog" in objs:
+        cog = step["cog_pos"]
+        objs["cog"].move(*_v(cog))
+        objs["cog"].material(_cog_color(step.get("phase", "drop")))
+
+
+def _fit_camera_dyn(scene, step, vehicle) -> None:
+    """Position camera to frame all 4 corners of the full vehicle."""
+    all_pts = []
+    for key, attr, _, _ in _DYN_CORNERS:
+        corner = getattr(vehicle, attr)
+        hp = corner.hardpoints
+        s = step.get(key)
+        if s:
+            for k in ["ubj", "lbj", "wc", "tr_ob", "s_ob", "ucl_ob", "lcl_ob"]:
+                if k in s:
+                    all_pts.append(np.asarray(s[k]))
+        for attr_name in ["uf", "ur", "lf", "lr", "s_ib", "tl_f", "ucl_ib", "lcl_ib"]:
+            pt = s.get(attr_name) if s else None
+            if pt is None and hasattr(hp, attr_name):
+                pt = getattr(hp, attr_name)
+            if pt is not None:
+                all_pts.append(np.asarray(pt))
+    if not all_pts:
+        return
+    arr  = np.array(all_pts) * _S
+    ctr  = arr.mean(axis=0)
+    span = float(np.max(arr.max(axis=0) - arr.min(axis=0)))
+    dist = span * 1.6
+    scene.move_camera(
+        x=float(ctr[0]) + dist * 0.3,
+        y=float(ctr[1]) - dist * 1.2,
+        z=float(ctr[2]) + dist * 0.8,
+        look_at_x=float(ctr[0]),
+        look_at_y=float(ctr[1]),
+        look_at_z=float(ctr[2]),
+        up_x=0, up_y=0, up_z=1,
+    )
 
 def _fit_camera(scene, step, sim_type, vehicle, hp):
     """Position camera to frame the geometry."""
