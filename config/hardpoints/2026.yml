@@ -17,7 +17,7 @@ baja_2026:
       fr: 18
       rl: 18
       rr: 18
-    cog: [1136.363, 5.903, 300] #644.601] # [mm]
+    cog: [1136.363, 5.903, 644.601] # [mm]
     inertia: [ # [kg*m^2]
         [66.234342, 1.102215, -92.936421],
         [1.102215, 260.861372, -0.555730],
@@ -30,8 +30,11 @@ baja_2026:
     # shocks setup
     shock_setup:
       spring_rate: 10 # [N/mm]
-      compression_damping: 0.5 # [N*s/mm]
-      rebound_damping: 0.5 # [N*s/mm]
+      ls_comp: 0.5 # [N*s/mm] Low-speed compression
+      hs_comp: 0.5 # [N*s/mm] High-speed compression
+      ls_rebound: 0.5 # [N*s/mm] Low-speed rebound
+      hs_rebound: 0.5 # [N*s/mm] High-speed rebound
+      split_vel: 50.0 # [mm/s] Transition velocity
       preload: 0.0 # [mm]
       free_length: 254 # [mm]
 
@@ -67,8 +70,11 @@ baja_2026:
     # shocks setup
     shock_setup:
       spring_rate: 10 # [N/mm]
-      compression_damping: 0.5 # [N*s/mm]
-      rebound_damping: 0.5 # [N*s/mm]
+      ls_comp: 0.5 # [N*s/mm] Low-speed compression
+      hs_comp: 0.5 # [N*s/mm] High-speed compression
+      ls_rebound: 0.5 # [N*s/mm] Low-speed rebound
+      hs_rebound: 0.5 # [N*s/mm] High-speed rebound
+      split_vel: 50.0 # [mm/s] Transition velocity
       preload: 0.0 # [mm]
       free_length: 254 # [mm]
 
