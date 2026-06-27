@@ -2,20 +2,20 @@
 
 SAGE is a Python-based simulation suite for designing, analyzing, and optimizing off-road vehicle suspension geometry. This tool provides kinematic analysis, quasi-static dynamic terrain simulation, and hardpoint optimization for **Double A-Arm** (Front) and **Semi-Trailing Link** (Rear) suspension types.
 
-## Key Features
+## Key Capabilities
 
 * **Kinematic Analysis (`kin`)**:
-    * Sweep suspension through Travel (Bump/Droop) and Steering.
-    * Calculate key metrics: Camber, Caster, Toe, and CV Joint angles.
-    * Resolve global positions of outboard points through travel/steer and export to SOLIDWORKS.
-    * **Ackermann Geometry**: Analyze steering geometry percentages and curves across the full rack travel.
+    * **Sweep Suspension**: Travel (Bump/Droop), Steering, and combined interactions (Droop/Steer, Jounce/Steer).
+    * **Calculated Metrics**: Camber, Caster, Toe, and CV Joint angles.
+    * **Ackermann Geometry**: Analyze steering geometry percentages and curves across full rack travel.
+    * **Extreme Points**: Resolve global bounds of outboard points through full travel/steer and export directly to XLSX for use in CAD.
 * **Dynamic Simulation (`dyn`)**:
-    * **Live 3D Visualization**: Watch the vehicle drive over procedural terrain in real-time.
-    * **Quasi-Static Solver**: Solves for chassis equilibrium (Heave, Pitch, Roll) at every step to ensure wheels track the terrain accurately.
-    * **Terrain Generation**: Configurable sine-wave profiles to simulate "whoops" or rough terrain.
+    * **Static/Drop Simulation**: Solves for chassis equilibrium (Heave, Pitch, Roll) and simulates the vehicle response to a full-vehicle drop using ODE integrators. 
+    * **Shock Dyno**: Simulates damper performance with harmonic excitations to evaluate wheel rates and damping curves.
 * **Optimization (`opt`)**:
-    * Optimize hardpoint locations to minimize specific objectives like Bump Steer.
-    * Support for multi-objective optimization using genetic algorithms.
+    * Genetic algorithm (NSGA-II) optimizer to refine hardpoint locations.
+    * Minimizes specific kinematic objectives like Bump Steer or Camber Gain.
+    * Generates Pareto-optimal solutions and plots performance trade-offs.
 
 ---
 
@@ -44,66 +44,104 @@ SAGE is a Python-based simulation suite for designing, analyzing, and optimizing
 
 ---
 
-## Usage Modes
+## Main Entrypoints
 
-The tool is run via `main.py` with a specific command mode: `kin`, `dyn`, or `opt`.
+SAGE has two main interfaces for interacting with the simulation engine: an interactive Web UI and a CLI.
 
-### 1. Kinematic Analysis
-Runs a geometric sweep of the suspension. Best for validating hardpoints and checking kinematic curves.
+### 1. Interactive Web UI (`app.py`)
+The recommended way to use SAGE is through the local web application. It provides real-time 3D visualization, interactive charts, and on-the-fly configuration editing.
 
+```bash
+python app.py
+```
+- Automatically opens in your browser at `http://localhost:8080`.
+- Includes a live 3D viewer, 2D kinematic charts, and dynamic simulation animations.
+- Allows live editing of YAML configurations (hardpoints and simulation parameters) directly in the browser.
+
+### 2. Command Line Interface (`main.py`)
+The CLI is useful for batch processing, scripting, and headless execution. It outputs 3D/2D matplotlib plots and console logs.
+
+#### Kinematics
+Runs a geometric sweep of the suspension.
 ```bash
 python main.py kin
 ```
-- **Config File**: `config/kin_config.yml`
-- **Output**: Interactive 3D plots and 2D charts for Camber, Toe, and Caster curves
 
-### 2. Dynamic Simulation
-Runs a "Live" simulation of the vehicle driving over terrain.
-
+#### Dynamics
+Runs a dynamic simulation (Drop or Shock Dyno).
 ```bash
 python main.py dyn
 ```
-- **Config File**: `config/dyn_config.yml` (Controls speed and terrain shape).
-- **Config File**: `config/kin_config.yml` (Selects the vehicle hardpoints).
-- **Output**: A real-time animated dashboard showing the vehicle geometry and shock travel logs.
 
-### 3. Optimization
-Runs the genetic optimizer to refine hardpoint locations.
-
+#### Optimization
+Runs the genetic optimizer.
 ```bash
 python main.py opt
 ```
-- **Config File**: `config/opt_config.yml`.
-- **Output**: Pareto-optimal solutions logged to the terminal and visualized via Pareto plots.
+
+---
 
 ## Configuration Guide
-`config/kin_config.yml`
 
+Simulation parameters are controlled via YAML files located in the `config/` directory. The vehicle's hardpoints are defined in `config/hardpoints/`.
+
+### Kinematics (`config/kin_config.yml`)
 Controls the kinematic sweep parameters.
+```yaml
+HARDPOINTS: '2026'              # Filename in config/hardpoints/ (e.g. 2026.yml)
+SIM_STEPS:  330                 # Resolution of the sweep
+SIMULATION: 'travel'            # 'steer', 'travel', 'droop_steer', 'jounce_steer', 'extreme', or 'ackermann'
 
-```yml
-HARDPOINTS: '2026'      # Filename in config/hardpoints/ (e.g. 2026.yml)
-SIM_STEPS:  330         # Resolution of the sweep
-SIMULATION: 'travel'    # 'steer', 'travel', 'steer_travel', or 'ackermann'
-
-HALF: 'front'           # 'front' or 'rear'
-SIDE: 'right'           # 'left' or 'right'
+HALF: 'front'                   # 'front' or 'rear'
+SIDE: 'right'                   # 'left' or 'right'
 
 TRAVEL:
-  MIN: -90              # [mm] Max Droop (Extension)
-  MAX:  240             # [mm] Max Bump (Compression)
+  MIN: -90                      # [mm] Max Droop (Extension)
+  MAX:  240                     # [mm] Max Bump (Compression)
 ```
 
-`config/dyn_config.yml`
-
+### Dynamics (`config/dyn_config.yml`)
 Controls the dynamic terrain simulation parameters.
+```yaml
+SIMULATION: 'shock_dyno' # 'static' (drop), 'shock_dyno'
 
-```yml
-VIZ_DT: 0.05            # [s] Time between visual frames
-DURATION: 60.0          # [s] Total simulation length
-VELOCITY: 10.0          # [m/s] Forward speed
+SOL_DT: 0.001            # [s] ODE integrator timestep
+VIZ_DT: 0.01             # [s] visualization frame interval
 
-TERRAIN:
-  AMPLITUDE: 70.0       # [mm] Height of the bumps
-  FREQUENCY: 0.5        # [Hz] Spacing of the bumps
+# Static/Drop Parameters
+HOIST_DURATION: 0.5      # [s] time to hold CoG at hoist height before release
+HOIST_HEIGHT: 0.5        # [m] height above static CoG to hoist to
+MAX_SIM_TIME: 3.0        # [s] hard stop for the drop phase
+
+# Shock Dyno Parameters
+DYNO_STROKE: 50          # [mm]
+DYNO_FREQUENCY: 1.63     # [Hz]
+```
+
+### Optimizer (`config/opt_config.yml`)
+Controls the optimization parameters.
+```yaml
+# GLOBAL OPTIMIZER
+POP_SIZE: 35             # Size of the population
+N_OFFSPRINGS: 25         # Number of off
+MAX_GEN: 25              # Maximum number of generations
+M_PROB: 1.0              # Mutation probability
+M_ETA: 15                # Mutation eta (polynomial mutation)
+
+# OPTIMIZATION TO RUN
+OBJECTIVES:              # Objectives to optimize
+  - MinimumBumpSteer
+  - ParallelSteer
+  - NoCollision
+
+# PARAMETERS TO OPTIMIZE
+FREE_POINTS:             # Parameters to optimize
+  "point_name_1":        # Name of the hardpoint to optimize (must match the hardpoint name in the hardpoint YAML file)
+    x: [MIN, MAX]        # [mm] Limits for x-coordinate
+    y: [MIN, MAX]        # [mm] Limits for y-coordinate
+    z: [MIN, MAX]        # [mm] Limits for z-coordinate
+  "point_name_2":          # Name of the hardpoint to optimize (must match the hardpoint name in the hardpoint YAML file)
+    x: [MIN, MAX]        # [mm] Limits for x-coordinate
+    y: [MIN, MAX]        # [mm] Limits for y-coordinate
+    z: [MIN, MAX]        # [mm] Limits for z-coordinate
 ```
