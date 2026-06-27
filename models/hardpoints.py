@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 # default
-import yaml
 from dataclasses import dataclass, field, fields
 from typing import List, Dict
 
@@ -17,6 +16,8 @@ class Hardpoints:
     # wheel properties
     wr: float = field(default=0.0, init=False)
     ww: float = field(default=0.0, init=False)
+    wheel_stiffness: float = field(default=0.0, init=False)  # [N/mm]
+    wheel_damping:   float = field(default=0.0, init=False)  # [N·s/mm]
 
     @property
     def names(self) -> List[str]:
@@ -28,6 +29,8 @@ class Hardpoints:
         self.shock_max = data['shock_max']
         self.wr = data['wheel_properties']['radius']
         self.ww = data['wheel_properties']['width']
+        self.wheel_stiffness = data['wheel_properties']['stiffness']
+        self.wheel_damping   = data['wheel_properties']['damping']
 
     @classmethod
     def from_data(cls, data: dict) -> Hardpoints:

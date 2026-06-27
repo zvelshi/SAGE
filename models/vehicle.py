@@ -8,9 +8,10 @@ import numpy as np
 
 # ours
 from models.hardpoints import DoubleAArm, SemiTrailingLink
-from models.corners.double_a_arm import DoubleAArmNumeric
-from models.corners.semi_trailing_link import SemiTrailingLinkNumeric
+from models.corners.double_a_arm_analytical import DoubleAArmAnalytical
+from models.corners.semi_trailing_link_analytical import SemiTrailingLinkAnalytical
 from models.components.shock import Shock
+from models.wheel import Wheel
 from utils.misc import log_to_file
 
 class Vehicle:
@@ -83,5 +84,6 @@ class Corner:
         hp._fill_vehicle_properties(data=data)
 
         self.hardpoints = hp
-        self.solver = DoubleAArmNumeric(hp) if isinstance(hp, DoubleAArm) else SemiTrailingLinkNumeric(hp)
+        self.solver = DoubleAArmAnalytical(hp) if isinstance(hp, DoubleAArm) else SemiTrailingLinkAnalytical(hp)
         self.shock = Shock.from_config(corner_data, data['shock_max'], data['shock_min'])
+        self.wheel = Wheel.from_config(data)
