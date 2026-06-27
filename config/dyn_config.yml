@@ -1,16 +1,12 @@
-SIMULATION: 'terrain' # 'terrain'
+SIMULATION: 'shock_dyno' # 'static', 'shock_dyno'
 
-SOL_DT: 0.005 # [s]
-VIZ_DT: 0.01 # [s]
+SOL_DT: 0.001        # [s] ODE integrator timestep
+VIZ_DT: 0.01         # [s] visualization frame interval
 
-DURATION: 3.0 # [s]
-VELOCITY: 0.0 # [m/s]
-RAMP_DURATION: 2.0 # [s]
-KP_VELOCITY: 50.0 # [Nm/(rad/s)]
+HOIST_DURATION: 0.5  # [s] time to hold CoG at hoist height before release
+HOIST_HEIGHT: 0.5    # [m] height above static CoG to hoist to
 
-HOIST_DURATION: 0.05 # [s]
-DROP_HEIGHT: 0.5 # [m]
+MAX_SIM_TIME: 3.0    # [s] hard stop for the drop phase
 
-TERRAIN:
-  AMPLITUDE: 40.0 # [mm]
-  FREQUENCY: 0.5 # [Hz]
+DYNO_STROKE: 50      # [mm]
+DYNO_FREQUENCY: 1.63 # [Hz]
