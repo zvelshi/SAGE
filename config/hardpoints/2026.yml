@@ -29,7 +29,7 @@ baja_2026:
 
     # shocks setup
     shock_setup:
-      spring_rate: 10 # [N/mm]
+      spring_rate: 11.38 # [N/mm]
       ls_comp: 0.5 # [N*s/mm] Low-speed compression
       hs_comp: 0.5 # [N*s/mm] High-speed compression
       ls_rebound: 0.5 # [N*s/mm] Low-speed rebound
@@ -69,7 +69,7 @@ baja_2026:
 
     # shocks setup
     shock_setup:
-      spring_rate: 10 # [N/mm]
+      spring_rate: 15.76 # [N/mm]
       ls_comp: 0.5 # [N*s/mm] Low-speed compression
       hs_comp: 0.5 # [N*s/mm] High-speed compression
       ls_rebound: 0.5 # [N*s/mm] Low-speed rebound

@@ -14,7 +14,7 @@ from simulations.scenarios.kin.sweep import SuspensionSweep
 from simulations.scenarios.dyn.shock_dyno import ShockDyno
 from simulations.scenarios.dyn.static import StaticDrop
 from optimization.engine import SuspensionOptimizer
-from utils.misc import setup_logging, save_configs, export_extreme_points_to_xlsx
+from utils.misc import setup_logging, save_configs, export_extreme_points_to_xlsx, export_static_hardpoints
 
 def _run_kin(kin_text: str, sim_type: str):
     run_dir = setup_logging("kin_sim")
@@ -82,7 +82,10 @@ def _run_dyn(kin_text: str, dyn_text: str, sim_type: str, progress_store: dict |
                 writer.writerows(steps)
     else:
         steps = StaticDrop(vehicle, dyn_cfg, on_progress=on_progress).run()
-        
+
+        if steps:
+            export_static_hardpoints(vehicle, steps[-1], kin_cfg['HARDPOINTS'], run_dir)
+
     return steps, vehicle, run_dir, dyn_cfg
 
 def _run_opt(kin_text: str, opt_text: str):

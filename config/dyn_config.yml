@@ -6,7 +6,7 @@ VIZ_DT: 0.01         # [s] visualization frame interval
 HOIST_DURATION: 0.5  # [s] time to hold CoG at hoist height before release
 HOIST_HEIGHT: 0.5    # [m] height above static CoG to hoist to
 
-MAX_SIM_TIME: 3.0    # [s] hard stop for the drop phase
+MAX_SIM_TIME: 60.0   # [s] hard stop for the drop phase
 
 DYNO_STROKE: 50      # [mm]
 DYNO_FREQUENCY: 1.63 # [Hz]

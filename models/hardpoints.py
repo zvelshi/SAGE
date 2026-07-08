@@ -35,10 +35,20 @@ class Hardpoints:
     @classmethod
     def from_data(cls, data: dict) -> Hardpoints:
         raise NotImplementedError
-    
+
     @classmethod
     def link_lengths(cls, hp) -> Dict[str, float]:
         raise NotImplementedError
+
+    @classmethod
+    def points_to_yaml(cls, step: dict) -> dict:
+        """Map a solved step dict (keyed by attribute name, e.g. 'wc', 's_ib') back
+        to the point keys used in the hardpoints YAML, via `cls._YAML_MAP`."""
+        return {
+            yaml_key: [round(float(v), 3) for v in step[attr]]
+            for attr, yaml_key in cls._YAML_MAP.items()
+            if attr in step
+        }
     
     @classmethod
     def mirror_points(cls, hp: Hardpoints) -> Hardpoints:
@@ -80,23 +90,27 @@ class DoubleAArm(Hardpoints):
     # wheel points
     wc: np.ndarray          # wheel center point
 
+    _YAML_MAP = {
+        "uf":     "upper_a_arm_front",
+        "ur":     "upper_a_arm_rear",
+        "lf":     "lower_a_arm_front",
+        "lr":     "lower_a_arm_rear",
+        "ubj":    "upper_ball_joint",
+        "lbj":    "lower_ball_joint",
+        "tr_ib":  "tie_rod_inboard",
+        "tr_ob":  "tie_rod_outboard",
+        "s_ib":   "shock_inboard",
+        "s_ob":   "shock_outboard",
+        "piv_ib": "pivot_inboard",
+        "piv_ob": "pivot_outboard",
+        "wc":     "wheel_center",
+    }
+
     @classmethod
     def from_data(cls, data: dict) -> "DoubleAArm":
-        return DoubleAArm(
-            uf   =np.array(data['upper_a_arm_front']),
-            ur   =np.array(data['upper_a_arm_rear']),
-            lf   =np.array(data['lower_a_arm_front']),
-            lr   =np.array(data['lower_a_arm_rear']),
-            ubj  =np.array(data['upper_ball_joint']),
-            lbj  =np.array(data['lower_ball_joint']),
-            tr_ib=np.array(data['tie_rod_inboard']),
-            tr_ob=np.array(data['tie_rod_outboard']),
+        return cls(
+            **{attr: np.array(data[yaml_key]) for attr, yaml_key in cls._YAML_MAP.items()},
             s_loc=str(data['shock_location']),
-            s_ib =np.array(data['shock_inboard']),
-            s_ob =np.array(data['shock_outboard']),
-            piv_ib=np.array(data['pivot_inboard']),
-            piv_ob=np.array(data['pivot_outboard']),
-            wc   =np.array(data['wheel_center']),
         )
 
     @classmethod
@@ -135,19 +149,23 @@ class SemiTrailingLink(Hardpoints):
     # wheel points
     wc: np.ndarray           # wheel center point
 
+    _YAML_MAP = {
+        "tl_f":   "trailing_link_front",
+        "ucl_ib": "upper_camber_link_inboard",
+        "ucl_ob": "upper_camber_link_outboard",
+        "lcl_ib": "lower_camber_link_inboard",
+        "lcl_ob": "lower_camber_link_outboard",
+        "s_ib":   "shock_inboard",
+        "s_ob":   "shock_outboard",
+        "piv_ib": "pivot_inboard",
+        "piv_ob": "pivot_outboard",
+        "wc":     "wheel_center",
+    }
+
     @classmethod
     def from_data(cls, data: dict) -> "SemiTrailingLink":
         return cls(
-            tl_f  =np.array(data['trailing_link_front']),
-            ucl_ib=np.array(data['upper_camber_link_inboard']),
-            ucl_ob=np.array(data['upper_camber_link_outboard']),
-            lcl_ib=np.array(data['lower_camber_link_inboard']),
-            lcl_ob=np.array(data['lower_camber_link_outboard']),
-            s_ib  =np.array(data['shock_inboard']),
-            s_ob  =np.array(data['shock_outboard']),
-            piv_ib=np.array(data['pivot_inboard']),
-            piv_ob=np.array(data['pivot_outboard']),
-            wc    =np.array(data['wheel_center']),
+            **{attr: np.array(data[yaml_key]) for attr, yaml_key in cls._YAML_MAP.items()}
         )
 
     @classmethod

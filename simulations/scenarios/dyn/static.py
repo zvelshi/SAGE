@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 # default
+from collections import deque
 from typing import List, Dict, Any, Callable
 
 # third-party
@@ -151,14 +152,15 @@ def _initial_shock_lengths(vehicle) -> np.ndarray:
     """Get initial shock lengths."""
     return np.array([getattr(vehicle, a).hardpoints.shock_max for a in _CORNERS_ATTR], dtype=float)
 
-def _is_settled(state: np.ndarray, settled_counter: list, dt: float, threshold_mm_s: float = 2.0, window_s: float = 0.3) -> bool:
-    """Check if the vehicle is settled."""
-    vel = np.concatenate([state[3:6], state[10:14]])
-    if np.max(np.abs(vel)) < threshold_mm_s:
-        settled_counter[0] += dt
-    else:
-        settled_counter[0] = 0.0
-    return settled_counter[0] >= window_s
+def _is_settled(state: np.ndarray, z_cog_history: deque, z_cog_static: float, tol_frac: float = 0.02) -> bool:
+    """Check if the vehicle CoG has settled to within `tol_frac` (2% by default)
+    of the static ride height, sustained over the trailing history window."""
+    z_cog_history.append(state[_IDX_Z_COG])
+    if len(z_cog_history) < z_cog_history.maxlen:
+        return False
+    band = max(z_cog_history) - min(z_cog_history)
+    tol = tol_frac * abs(z_cog_static)
+    return band <= tol
 
 class StaticDrop(Scenario):
     """Full-vehicle drop from a hoisted height.
@@ -173,7 +175,7 @@ class StaticDrop(Scenario):
         self.viz_dt = float(config["VIZ_DT"])
         self.hoist_height_mm = float(config["HOIST_HEIGHT"]) * 1000.0
         self.hoist_duration  = float(config["HOIST_DURATION"])
-        self.max_sim_time = float(config["MAX_SIM_TIME"])
+        self.max_sim_time = float(config.get("MAX_SIM_TIME", 60.0))
         self._on_progress = on_progress if on_progress is not None else _noop_progress
 
     def _progress(self, fraction: float, message: str) -> None:
@@ -268,7 +270,9 @@ class StaticDrop(Scenario):
         self._progress(0.50, "Phase 2/2: dropping — vehicle in free fall...")
         print(f"  [DROP]  t={t:.3f} s — releasing body ({drop_steps:,} steps max)")
 
-        settled_counter = [0.0]
+        settle_window_s = 0.5
+        settle_window_steps = max(1, round(settle_window_s / dt))
+        z_cog_history: deque = deque(maxlen=settle_window_steps)
         contact_logged = [False]
         log_pct_next = log_10pct_d
 
@@ -311,7 +315,7 @@ class StaticDrop(Scenario):
                                f"CoG z={z_cog_now:.0f} mm  max|v|={max_vel:.0f} mm/s")
                 log_pct_next += log_10pct_d
 
-            if _is_settled(state, settled_counter, dt):
+            if _is_settled(state, z_cog_history, z_cog_static):
                 z_final = state[_IDX_Z_COG]
                 print(f"  [DROP]  t={t:.3f} s — SETTLED  "
                       f"CoG z={z_final:.1f} mm  "

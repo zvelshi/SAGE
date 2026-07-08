@@ -4,6 +4,7 @@ import os
 import datetime
 import shutil
 import pandas as pd
+import yaml
 
 class DualLogger(object):
     """
@@ -103,6 +104,38 @@ def pack_points_nicely(vehicle, id, step):
             pkg[name] = getattr(hp, name)
             
     return pkg
+
+def export_static_hardpoints(vehicle, settled_step, hardpoints_name, run_dir):
+    """
+    Copy the vehicle's source hardpoints YAML, inject the settled (world-frame)
+    inboard/outboard points and CoG height from a StaticDrop run, and save it as
+    '<hardpoints_name>_NEW_STATIC.yml' in the run directory.
+    """
+    src_path = f"config/hardpoints/{hardpoints_name}.yml"
+    if not os.path.exists(src_path):
+        log_to_file(f"WARNING: Could not find hardpoints file to export: {src_path}")
+        return None
+
+    with open(src_path) as f:
+        data = yaml.safe_load(f)
+
+    nickname = list(data.keys())[0]
+    root = data[nickname]
+
+    root["mass_properties"]["cog"] = [
+        round(float(v), 3) for v in settled_step["cog_pos"]
+    ]
+
+    for half, step_key in (("front", "fr"), ("rear", "rr")):
+        hp_cls = type(vehicle.get_corner_from_id([1, 0 if half == "front" else 1]).hardpoints)
+        root[half].update(hp_cls.points_to_yaml(settled_step[step_key]))
+
+    export_path = os.path.join(run_dir, f"{hardpoints_name}_NEW_STATIC.yml")
+    with open(export_path, "w") as f:
+        yaml.safe_dump(data, f, sort_keys=False)
+
+    log_to_file(f"Exported settled hardpoints to: {export_path}")
+    return export_path
 
 def export_extreme_points_to_xlsx(results, run_dir, config, template_path="example.xlsx"):
     log_to_file("-> Generating Extreme Points XLSX Export...")
