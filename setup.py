@@ -12,7 +12,7 @@ setup(
         "pymoo",
         "openpyxl",
         "pandas",
-        "nicegui"
+        "nicegui",
         "plotly"
     ],
 )
