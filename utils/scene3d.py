@@ -1,9 +1,12 @@
 # third-party
 import numpy as np
-from scipy.spatial.transform import Rotation as _Rot
 
 # ours
 from models.hardpoints import DoubleAArm, SemiTrailingLink
+from utils.geometry import (
+    align_y_to_direction, shock_body_end as _shock_body_end,
+    axle_plunge_point as _axle_plunge_point, dash_segments,
+)
 
 # constants
 _S = 1.0 / 1000.0 # mm -> scene units
@@ -26,20 +29,9 @@ def _place_cyl(cyl, p1s: np.ndarray, p2s: np.ndarray):
     L = float(np.linalg.norm(d))
     if L < 1e-9:
         return
-    mid    = (p1s + p2s) * 0.5
-    d_norm = d / L
-    Y      = np.array([0., 1., 0.])
-    dot    = float(np.clip(np.dot(Y, d_norm), -1.0, 1.0))
+    mid = (p1s + p2s) * 0.5
     cyl.move(float(mid[0]), float(mid[1]), float(mid[2]))
-    if dot < 0.9999:
-        if dot > -0.9999:
-            ax = np.cross(Y, d_norm);  ax /= np.linalg.norm(ax)
-            rx, ry, rz = _Rot.from_rotvec(ax * np.arccos(dot)).as_euler('xyz')
-        else:
-            rx, ry, rz = np.pi, 0.0, 0.0
-        cyl.rotate(float(rx), float(ry), float(rz))
-    else:
-        cyl.rotate(0.0, 0.0, 0.0)
+    cyl.rotate(*align_y_to_direction(d))
 
 def _make_stick(scene, p1, p2, color, radius=0.004):
     """Create a cylinder with height = exact distance(p1, p2), correctly placed."""
@@ -72,15 +64,6 @@ def _move_variable_stick(cyl, p1, p2):
     cyl.scale(1.0, L, 1.0)
     _place_cyl(cyl, p1s, p2s)
 
-def _shock_body_end(s_ib, s_ob, shock_min_mm):
-    """Return the outboard end of the shock body (fixed length = shock_min_mm, in mm)."""
-    s_ib = np.asarray(s_ib, float);  s_ob = np.asarray(s_ob, float)
-    d = s_ob - s_ib
-    L = float(np.linalg.norm(d))
-    if L < 1e-9:
-        return s_ib + np.array([0.0, float(shock_min_mm), 0.0])
-    return s_ib + float(shock_min_mm) * (d / L)
-
 def _make_wheel(scene, wc, wheel_axis, wr_mm, ww_mm, color="#888888"):
     """Create wheel cylinder with correct radius and width baked in, then place it."""
     radius = float(wr_mm) * _S
@@ -92,24 +75,22 @@ def _make_wheel(scene, wc, wheel_axis, wr_mm, ww_mm, color="#888888"):
 def _move_wheel(cyl, wc, wheel_axis):
     """Reposition existing wheel cylinder (radius/width geometry unchanged)."""
     wc_s = np.asarray(wc, float) * _S
-    ax   = np.asarray(wheel_axis, float)
-    ax   = ax / (np.linalg.norm(ax) or 1.0)
-    Y    = np.array([0., 1., 0.])
-    dot  = float(np.clip(np.dot(Y, ax), -1.0, 1.0))
     cyl.move(float(wc_s[0]), float(wc_s[1]), float(wc_s[2]))
-    if dot < 0.9999:
-        if dot > -0.9999:
-            rot_ax = np.cross(Y, ax);  rot_ax /= np.linalg.norm(rot_ax)
-            rx, ry, rz = _Rot.from_rotvec(rot_ax * np.arccos(dot)).as_euler('xyz')
-        else:
-            rx, ry, rz = np.pi, 0.0, 0.0
-        cyl.rotate(float(rx), float(ry), float(rz))
-    else:
-        cyl.rotate(0.0, 0.0, 0.0)
+    cyl.rotate(*align_y_to_direction(np.asarray(wheel_axis, float)))
+
+def _make_dashed_line(scene, center, axis, length_mm, color, n_dashes=14, radius=0.0018, opacity=0.55):
+    """Static reference line made of short dashes, centered on `center` along `axis`."""
+    dashes = []
+    for p1, p2 in dash_segments(center, axis, length_mm, n_dashes):
+        cyl = _make_stick(scene, p1, p2, color, radius=radius)
+        cyl.material(color, opacity=opacity)
+        dashes.append(cyl)
+    return dashes
 
 def _build_corner_objects(scene, step, hp,
                            c_struct="#1e1e1e", c_tie="#009944",
-                           c_shock="#6e6e82", c_axle="#cc2828"):
+                           c_shock="#6e6e82", c_axle="#cc2828",
+                           show_guides=True):
     """Create all 3-D objects for one corner. Returns dict of Object3D refs."""
     o = {"_scene": scene, "_c_shock": c_shock, "_c_axle": c_axle}
     ax_default = np.array([0., 1., 0.])
@@ -133,8 +114,14 @@ def _build_corner_objects(scene, step, hp,
         o["shock_plunger"] = _make_variable_stick(scene, s_ib, step["s_ob"], c_shock, radius=0.003)
         o["shock_body"]    = _make_stick(scene, s_ib, _sbe,         c_shock, radius=0.012)
         if "piv_ob" in step:
-            o["axle_in"]  = _make_variable_stick(scene, piv_ib,        step["piv_ob"], c_axle)
+            plunge_mm = step.get("axle_data", {}).get("plunge_mm", 0.0)
+            piv_ib_dyn = _axle_plunge_point(piv_ib, step["piv_ob"], plunge_mm)
+            o["axle_in"]  = _make_variable_stick(scene, piv_ib_dyn,     step["piv_ob"], c_axle)
             o["axle_out"] = _make_stick(scene, step["piv_ob"], step["wc"],     c_axle)
+            o["sp_piv_ib"] = scene.sphere(radius=0.010).material("#000000").move(*_v(piv_ib_dyn))
+            o["sp_piv_ob"] = scene.sphere(radius=0.010).material("#000000").move(*_v(step["piv_ob"]))
+            if show_guides:
+                o["axle_ib_guide"] = _make_dashed_line(scene, piv_ib, [0, 1, 0], 250.0, c_axle)
         for k, pt in [("sp_uf", uf), ("sp_ur", ur), ("sp_lf", lf),
                       ("sp_lr", lr), ("sp_s_ib", s_ib)]:
             o[k] = scene.sphere(radius=0.010).material("#222222").move(*_v(pt))
@@ -142,6 +129,8 @@ def _build_corner_objects(scene, step, hp,
                       ("sp_tr_ib", tr_ib), ("sp_tr_ob", step["tr_ob"]),
                       ("sp_s_ob", step["s_ob"])]:
             o[k] = scene.sphere(radius=0.010).material("#222222").move(*_v(pt))
+        if show_guides:
+            o["tie_ib_guide"] = _make_dashed_line(scene, tr_ib, [0, 1, 0], 250.0, c_tie)
         o["wheel"] = _make_wheel(scene, step["wc"], step.get("wheel_axis", ax_default), hp.wr, hp.ww)
         o["sp_wc"] = scene.sphere(radius=0.014).material("#4466bb").move(*_v(step["wc"]))
 
@@ -161,8 +150,14 @@ def _build_corner_objects(scene, step, hp,
         if float(np.linalg.norm(np.asarray(step["s_ob"]) - np.asarray(_sbe))) < 1.0:
             o["shock_plunger"].scale(1.0, 1e-6, 1.0)
         if "piv_ob" in step:
-            o["axle_in"]  = _make_variable_stick(scene, piv_ib,        step["piv_ob"], c_axle)
+            plunge_mm = step.get("axle_data", {}).get("plunge_mm", 0.0)
+            piv_ib_dyn = _axle_plunge_point(piv_ib, step["piv_ob"], plunge_mm)
+            o["axle_in"]  = _make_variable_stick(scene, piv_ib_dyn,     step["piv_ob"], c_axle)
             o["axle_out"] = _make_stick(scene, step["piv_ob"], step["wc"],     c_axle)
+            o["sp_piv_ib"] = scene.sphere(radius=0.010).material("#000000").move(*_v(piv_ib_dyn))
+            o["sp_piv_ob"] = scene.sphere(radius=0.010).material("#000000").move(*_v(step["piv_ob"]))
+            if show_guides:
+                o["axle_ib_guide"] = _make_dashed_line(scene, piv_ib, [0, 1, 0], 250.0, c_axle)
         for k, pt in [("sp_tl_f", tl_f), ("sp_ucl_ib", ucl_ib),
                       ("sp_lcl_ib", lcl_ib), ("sp_s_ib", s_ib)]:
             o[k] = scene.sphere(radius=0.010).material("#222222").move(*_v(pt))
@@ -206,8 +201,15 @@ def _update_corner_objects(o, step, hp):
             _move_variable_stick(o["shock_plunger"], _sbe, step["s_ob"])
         else:
             o["shock_plunger"].scale(1.0, 1e-6, 1.0)
-        if "axle_in" in o and "piv_ob" in step:
-            _move_variable_stick(o["axle_in"], piv_ib, step["piv_ob"])
+        if "piv_ob" in step:
+            plunge_mm = step.get("axle_data", {}).get("plunge_mm", 0.0)
+            piv_ib_dyn = _axle_plunge_point(piv_ib, step["piv_ob"], plunge_mm)
+            if "axle_in" in o:
+                _move_variable_stick(o["axle_in"], piv_ib_dyn, step["piv_ob"])
+            if "sp_piv_ib" in o:
+                o["sp_piv_ib"].move(*_v(piv_ib_dyn))
+            if "sp_piv_ob" in o:
+                o["sp_piv_ob"].move(*_v(step["piv_ob"]))
         o["sp_uf"].move(*_v(uf));  o["sp_ur"].move(*_v(ur))
         o["sp_lf"].move(*_v(lf));  o["sp_lr"].move(*_v(lr))
         o["sp_s_ib"].move(*_v(s_ib))
@@ -237,8 +239,15 @@ def _update_corner_objects(o, step, hp):
             _move_variable_stick(o["shock_plunger"], _sbe, step["s_ob"])
         else:
             o["shock_plunger"].scale(1.0, 1e-6, 1.0)
-        if "axle_in" in o and "piv_ob" in step:
-            _move_variable_stick(o["axle_in"], piv_ib, step["piv_ob"])
+        if "piv_ob" in step:
+            plunge_mm = step.get("axle_data", {}).get("plunge_mm", 0.0)
+            piv_ib_dyn = _axle_plunge_point(piv_ib, step["piv_ob"], plunge_mm)
+            if "axle_in" in o:
+                _move_variable_stick(o["axle_in"], piv_ib_dyn, step["piv_ob"])
+            if "sp_piv_ib" in o:
+                o["sp_piv_ib"].move(*_v(piv_ib_dyn))
+            if "sp_piv_ob" in o:
+                o["sp_piv_ob"].move(*_v(step["piv_ob"]))
         o["sp_tl_f"].move(*_v(tl_f))
         o["sp_ucl_ib"].move(*_v(ucl_ib));  o["sp_lcl_ib"].move(*_v(lcl_ib))
         o["sp_s_ib"].move(*_v(s_ib))
@@ -292,7 +301,7 @@ def _build_dyn_scene(scene, step, vehicle) -> dict:
             corner = getattr(vehicle, attr)
             if step.get(key) is not None:
                 objs[key] = _build_corner_objects(scene, step[key], corner.hardpoints,
-                                                   c_struct=c_struct)
+                                                   c_struct=c_struct, show_guides=False)
         cog = step["cog_pos"]
         objs["cog"] = (
             scene.sphere(radius=0.05)

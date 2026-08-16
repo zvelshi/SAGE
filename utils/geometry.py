@@ -3,6 +3,7 @@ from typing import Dict
 
 # third-party
 import numpy as np
+from scipy.spatial.transform import Rotation as _Rot
 
 def _circle_from_spheres(c1: np.ndarray, r1: float, c2: np.ndarray, r2: float):
     """Intersection circle of two spheres. Returns (center, radius, u, v) or None."""
@@ -127,7 +128,187 @@ def get_caster_angle(step: Dict) -> float:
         return 0.0
     v = step["ubj"] - step["lbj"]
     return np.rad2deg(np.arctan2(v[0], v[2]))
- 
+
+def get_contact_patch(step: Dict, wr: float) -> np.ndarray:
+    """Tyre contact centre: the wheel-radius vector from wc, tilted by camber,
+    that points most toward the ground."""
+    wc = np.asarray(step["wc"], float)
+    axis = np.asarray(step["wheel_axis"], float)
+    down = np.array([0., 0., -1.])
+    m = down - np.dot(down, axis) * axis
+    n = np.linalg.norm(m)
+    if n < 1e-9:
+        return wc + np.array([0., 0., -wr])
+    return wc + wr * (m / n)
+
+def _steering_axis_point_at_z(step: Dict, z: float) -> np.ndarray | None:
+    """Point where the steering axis (line through lbj/ubj) crosses height z."""
+    lbj = np.asarray(step["lbj"], float)
+    ubj = np.asarray(step["ubj"], float)
+    axis_up = ubj - lbj
+    if abs(axis_up[2]) < 1e-9:
+        return None
+    t = (z - lbj[2]) / axis_up[2]
+    return lbj + t * axis_up
+
+def get_kingpin_angle(step: Dict) -> float:
+    """Front-elevation angle of the steering axis from vertical.
+    Positive when the axis leans inward at the top."""
+    lbj = np.asarray(step["lbj"], float)
+    ubj = np.asarray(step["ubj"], float)
+    axis_up = ubj - lbj
+    return -np.rad2deg(np.arctan2(axis_up[1], axis_up[2]))
+
+def get_caster_trail(step: Dict) -> float:
+    """Side-elevation X distance, at wheel-centre height, between the steering
+    axis and the wheel centre. Positive when the axis is forward of the wheel."""
+    wc = np.asarray(step["wc"], float)
+    p = _steering_axis_point_at_z(step, wc[2])
+    if p is None:
+        return 0.0
+    return float(p[0] - wc[0])
+
+def get_caster_offset(step: Dict, wr: float) -> float:
+    """Side-elevation X distance, at ground height, between the steering axis
+    and the tyre contact centre. Positive when the axis is forward of contact."""
+    contact = get_contact_patch(step, wr)
+    p = _steering_axis_point_at_z(step, contact[2])
+    if p is None:
+        return 0.0
+    return float(contact[0] - p[0])
+
+def get_kingpin_offset_wheel(step: Dict) -> float:
+    """Front-elevation Y distance, at wheel-centre height, from the wheel
+    centre to the steering axis. Positive when the wheel is outboard."""
+    wc = np.asarray(step["wc"], float)
+    p = _steering_axis_point_at_z(step, wc[2])
+    if p is None:
+        return 0.0
+    return float(wc[1] - p[1])
+
+def get_kingpin_offset_ground(step: Dict, wr: float) -> float:
+    """Front-elevation Y distance, at ground height, between the steering axis
+    and the tyre contact centre. Positive when contact is outboard of the axis."""
+    contact = get_contact_patch(step, wr)
+    p = _steering_axis_point_at_z(step, contact[2])
+    if p is None:
+        return 0.0
+    return float(contact[1] - p[1])
+
+def get_mechanical_trail(step: Dict, wr: float) -> float:
+    """Side-elevation perpendicular distance between the steering axis and the
+    tyre contact centre."""
+    lbj = np.asarray(step["lbj"], float)
+    ubj = np.asarray(step["ubj"], float)
+    contact = get_contact_patch(step, wr)
+    axis_side = np.array([ubj[0] - lbj[0], ubj[2] - lbj[2]])
+    n = np.linalg.norm(axis_side)
+    if n < 1e-9:
+        return 0.0
+    axis_side /= n
+    v = np.array([contact[0] - lbj[0], contact[2] - lbj[2]])
+    perp = v - np.dot(v, axis_side) * axis_side
+    return float(np.linalg.norm(perp))
+
+def contact_patch_z_series(steps: list, wr: float) -> np.ndarray:
+    """Tyre contact-centre height across a sequence of steps."""
+    if not wr:
+        return np.array([s["wc"][2] for s in steps], dtype=float)
+    return np.array([get_contact_patch(s, wr)[2] for s in steps], dtype=float)
+
+def motion_ratio_series(steps: list, wr: float = 0.0) -> np.ndarray:
+    """Instantaneous Motion Ratio per the Lotus definition: the ratio of change
+    in vertical height of the tyre contact centre to change in spring/shock
+    length (unsigned; >1 when the wheel moves more than the spring).
+    MR = |d(contact_patch_z)/d(shock_length)|. Computed as a true finite-
+    difference derivative w.r.t. shock length (not index), which is robust to
+    uneven step spacing (e.g. steer sweeps)."""
+    contact_z = contact_patch_z_series(steps, wr)
+    shock_len = np.array([s["shock_length"] for s in steps], dtype=float)
+    if len(steps) < 2:
+        return np.zeros_like(shock_len)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        motion_ratio = np.gradient(contact_z, shock_len)
+    motion_ratio = np.abs(motion_ratio)
+    motion_ratio[~np.isfinite(motion_ratio)] = 0.0
+    return motion_ratio
+
+def static_ride_height_index(steps: list) -> int:
+    """Index of the step closest to 0mm shock travel / 0mm steer (ride height, centered)."""
+    def dist(s):
+        t  = s.get("travel_mm", 0.0) or 0.0
+        st = s.get("steer_mm", 0.0) or 0.0
+        return t * t + st * st
+    return min(range(len(steps)), key=lambda i: dist(steps[i]))
+
+def get_steering_axis_geometry(step: Dict, wr: float) -> Dict[str, float]:
+    return {
+        "kingpin_angle":      get_kingpin_angle(step),
+        "caster_trail":       get_caster_trail(step),
+        "caster_offset":      get_caster_offset(step, wr),
+        "kingpin_offset_wc":  get_kingpin_offset_wheel(step),
+        "kingpin_offset_gnd": get_kingpin_offset_ground(step, wr),
+        "mechanical_trail":   get_mechanical_trail(step, wr),
+    }
+
+def align_y_to_direction(direction: np.ndarray) -> tuple[float, float, float]:
+    """Euler angles (xyz) that rotate the +Y axis onto unit vector `direction`.
+    Used to orient any Y-aligned primitive (cylinder, wheel disc) along an
+    arbitrary 3-D direction (a link axis, a wheel spin axis, ...)."""
+    d = np.asarray(direction, float)
+    n = np.linalg.norm(d)
+    d = d / n if n > 1e-9 else np.array([0., 1., 0.])
+    Y = np.array([0., 1., 0.])
+    dot = float(np.clip(np.dot(Y, d), -1.0, 1.0))
+    if dot >= 0.9999:
+        return 0.0, 0.0, 0.0
+    if dot <= -0.9999:
+        return np.pi, 0.0, 0.0
+    ax = np.cross(Y, d)
+    ax /= np.linalg.norm(ax)
+    rx, ry, rz = _Rot.from_rotvec(ax * np.arccos(dot)).as_euler('xyz')
+    return float(rx), float(ry), float(rz)
+
+def shock_body_end(s_ib: np.ndarray, s_ob: np.ndarray, shock_min_mm: float) -> np.ndarray:
+    """Outboard end of the (fixed-length) shock body, given the current shock
+    inboard/outboard mount points and the body's static length."""
+    s_ib = np.asarray(s_ib, float)
+    s_ob = np.asarray(s_ob, float)
+    d = s_ob - s_ib
+    L = float(np.linalg.norm(d))
+    if L < 1e-9:
+        return s_ib + np.array([0.0, float(shock_min_mm), 0.0])
+    return s_ib + float(shock_min_mm) * (d / L)
+
+def axle_plunge_point(piv_ib: np.ndarray, piv_ob: np.ndarray, plunge_mm: float) -> np.ndarray:
+    """Offset the inboard axle (CV plunge joint) point along the shaft axis by
+    the current plunge amount, so it visually slides relative to the fixed
+    chassis mount."""
+    piv_ib = np.asarray(piv_ib, float)
+    piv_ob = np.asarray(piv_ob, float)
+    d = piv_ob - piv_ib
+    L = float(np.linalg.norm(d))
+    if L < 1e-9:
+        return piv_ib
+    return piv_ib + (d / L) * float(plunge_mm)
+
+def dash_segments(center: np.ndarray, axis: np.ndarray, length_mm: float,
+                   n_dashes: int = 14) -> list[tuple[np.ndarray, np.ndarray]]:
+    """(p1, p2) endpoint pairs for a dashed reference line of total `length_mm`,
+    centered on `center` and running along `axis`."""
+    center = np.asarray(center, float)
+    axis   = np.asarray(axis, float)
+    n = np.linalg.norm(axis)
+    axis = axis / n if n > 1e-9 else np.array([0., 1., 0.])
+    half = float(length_mm) / 2.0
+    step_len = float(length_mm) / (2 * n_dashes - 1)
+    segments = []
+    for i in range(n_dashes):
+        t0 = -half + i * 2 * step_len
+        t1 = t0 + step_len
+        segments.append((center + axis * t0, center + axis * t1))
+    return segments
+
 def calculate_ackermann_percentage(
     inner_toe: float, 
     outer_toe: float, 

@@ -7,7 +7,10 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 # ours
-from utils.geometry import get_wheel_attitude
+from utils.geometry import (
+    get_wheel_attitude, get_steering_axis_geometry,
+    motion_ratio_series, static_ride_height_index,
+)
 
 _LAYOUT_BASE = dict(
     margin=dict(l=44, r=8, t=30, b=32),
@@ -123,7 +126,7 @@ def _build_dyno_figures(steps: list) -> tuple[list[tuple[str, Any]], list[float]
 
     return named_figs, t
 
-def _build_kin_figures(steps):
+def _build_kin_figures(steps, half_label="Front", wr=0.0):
     atts = [get_wheel_attitude(s) for s in steps]
     plunge, a_ib, a_ob = [], [], []
     for s in steps:
@@ -152,6 +155,8 @@ def _build_kin_figures(steps):
                         shapes=[_vline_shape(x0)])
         return f
 
+    motion_ratio = motion_ratio_series(steps, wr=wr)
+
     return [
         ("camber", mfig("Camber [°]",
             [go.Scatter(x=xs, y=[a["camber"] for a in atts],
@@ -162,6 +167,9 @@ def _build_kin_figures(steps):
         ("toe",    mfig("Toe [°]",
             [go.Scatter(x=xs, y=[a["toe"] for a in atts],
                         mode="lines", line=dict(color=_COLORS[2], width=2))])),
+        ("motion_ratio", mfig(f"Motion Ratio — {half_label} [-]",
+                    [go.Scatter(x=xs, y=motion_ratio.tolist(),
+                                mode="lines", line=dict(color=_COLORS[5], width=2))])),
         ("plunge", mfig("Axle Plunge [mm]",
             [go.Scatter(x=xs, y=plunge,
                         mode="lines", line=dict(color=_COLORS[3], width=2))])),
@@ -172,6 +180,47 @@ def _build_kin_figures(steps):
                        line=dict(color=_COLORS[4], width=2, dash="dash")),
         ], show_legend=True)),
     ], xs
+
+def _build_kin_stats(steps, wr=0.0):
+    """Static (0mm shock travel / 0mm steer) value cards for a corner kinematic sweep."""
+    idx = static_ride_height_index(steps)
+    static_step = steps[idx]
+    att = get_wheel_attitude(static_step)
+    mr  = motion_ratio_series(steps, wr=wr)[idx]
+    stats = [
+        ("Motion Ratio (Static) [-]", f"{mr:.3f}"),
+        ("Camber (Static) [°]", f"{att['camber']:.2f}"),
+        ("Caster (Static) [°]", f"{att['caster']:.2f}"),
+        ("Toe (Static) [°]", f"{att['toe']:.2f}"),
+    ]
+    if "lbj" in static_step and "ubj" in static_step:
+        sa = get_steering_axis_geometry(static_step, wr)
+        stats.extend([
+            ("Kingpin Angle [°]", f"{sa['kingpin_angle']:.2f}"),
+            ("Caster Trail (Hub) [mm]", f"{sa['caster_trail']:.2f}"),
+            ("Caster Offset (Ground) [mm]", f"{sa['caster_offset']:.2f}"),
+            ("Kingpin Offset (Wheel Centre) [mm]", f"{sa['kingpin_offset_wc']:.2f}"),
+            ("Kingpin Offset (Ground) [mm]", f"{sa['kingpin_offset_gnd']:.2f}"),
+            ("Mechanical Trail (Ground) [mm]", f"{sa['mechanical_trail']:.2f}"),
+        ])
+    return stats
+
+def _build_dyn_stats(steps, corner_wr=None):
+    """After-settle (last frame) value cards for a dynamic drop / terrain run, per corner."""
+    corner_wr = corner_wr or {}
+    last = steps[-1]
+    stats = []
+    for key, label in [("fl", "FL"), ("fr", "FR"), ("rl", "RL"), ("rr", "RR")]:
+        corner_steps = [s[key] for s in steps if s.get(key)]
+        if not corner_steps or not last.get(key):
+            continue
+        mr  = motion_ratio_series(corner_steps, wr=corner_wr.get(key, 0.0))[-1]
+        att = get_wheel_attitude(last[key])
+        stats.append((f"{label} Motion Ratio (After Settle) [-]", f"{mr:.3f}"))
+        stats.append((f"{label} Camber (After Settle) [°]", f"{att['camber']:.2f}"))
+        stats.append((f"{label} Caster (After Settle) [°]", f"{att['caster']:.2f}"))
+        stats.append((f"{label} Toe (After Settle) [°]", f"{att['toe']:.2f}"))
+    return stats
 
 def _build_ackermann_figures(steps):
     xs = [s["input"] for s in steps]
@@ -255,6 +304,21 @@ def _build_dyn_figures(steps: list[dict[str, Any]]):
                         shapes=[_vline_shape(x0)])
         return f
 
+    def _attitude(key, field):
+        out = []
+        for s in steps:
+            corner = s.get(key)
+            out.append(get_wheel_attitude(corner)[field] if corner else None)
+        return out
+
+    def _lr_fig(title, field, l_key, r_key, color):
+        return mfig(title, [
+            go.Scatter(x=xs, y=_attitude(l_key, field), mode="lines", name=l_key.upper(),
+                       line=dict(color=color, width=1.5)),
+            go.Scatter(x=xs, y=_attitude(r_key, field), mode="lines", name=r_key.upper(),
+                       line=dict(color=color, width=1.5, dash="dot")),
+        ], show_legend=True)
+
     return [
         ("cog_z", mfig("CoG Z [mm]", [go.Scatter(x=xs, y=z_cog, mode="lines", line=dict(color=_COLORS[0], width=2))])),
         ("cog_roll", mfig("Roll [°]", [go.Scatter(x=xs, y=roll, mode="lines", line=dict(color=_COLORS[1], width=2))])),
@@ -265,4 +329,10 @@ def _build_dyn_figures(steps: list[dict[str, Any]]):
             go.Scatter(x=xs, y=sl_rl, mode="lines", name="RL", line=dict(color=_COLORS[2], width=1.5, dash="dash")),
             go.Scatter(x=xs, y=sl_rr, mode="lines", name="RR", line=dict(color=_COLORS[3], width=1.5, dash="dash")),
         ], show_legend=True)),
+        ("camber_front", _lr_fig("Front Camber [°]", "camber", "fl", "fr", _C_FRONT)),
+        ("caster_front", _lr_fig("Front Caster [°]", "caster", "fl", "fr", _C_FRONT)),
+        ("toe_front",    _lr_fig("Front Toe [°]",    "toe",    "fl", "fr", _C_FRONT)),
+        ("camber_rear",  _lr_fig("Rear Camber [°]",  "camber", "rl", "rr", _C_REAR)),
+        ("caster_rear",  _lr_fig("Rear Caster [°]",  "caster", "rl", "rr", _C_REAR)),
+        ("toe_rear",     _lr_fig("Rear Toe [°]",     "toe",    "rl", "rr", _C_REAR)),
     ], xs
