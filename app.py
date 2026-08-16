@@ -317,6 +317,19 @@ def main_page():
             else:
                 named_figs, xs = _build_kin_figures(steps)
 
+                axle_steps = [s["axle_data"] for s in steps if s.get("axle_data")]
+                if axle_steps:
+                    half_label = "Rear" if corner_id[1] == 1 else "Front"
+                    abs_plunge = max(abs(a["plunge_mm"]) for a in axle_steps)
+                    abs_angle  = max(max(a["angle_ib_deg"], a["angle_ob_deg"]) for a in axle_steps)
+                    with ui.row().classes("w-full gap-2"):
+                        with ui.card().classes("px-4 py-2"):
+                            ui.label(f"{half_label} — Absolute Plunge [mm]").classes("text-xs text-stone-500")
+                            ui.label(f"{abs_plunge:.2f}").classes("text-lg font-semibold text-emerald-700")
+                        with ui.card().classes("px-4 py-2"):
+                            ui.label(f"{half_label} — Absolute Max Joint Angle [deg]").classes("text-xs text-stone-500")
+                            ui.label(f"{abs_angle:.2f}").classes("text-lg font-semibold text-emerald-700")
+
             cache["xs"] = xs
             cache["named_figs"] = named_figs
 

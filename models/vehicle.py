@@ -10,6 +10,8 @@ import numpy as np
 from models.hardpoints import DoubleAArm, SemiTrailingLink
 from models.corners.double_a_arm import DoubleAArmNumeric
 from models.corners.semi_trailing_link import SemiTrailingLinkNumeric
+from models.components.axle import Axle
+from models.components.cv_joint import CVJoint, PlungingCVJoint
 from models.components.shock import Shock
 from models.wheel import Wheel
 from utils.misc import log_to_file
@@ -84,6 +86,13 @@ class Corner:
         hp._fill_vehicle_properties(data=data)
 
         self.hardpoints = hp
-        self.solver = DoubleAArmNumeric(hp) if isinstance(hp, DoubleAArm) else SemiTrailingLinkNumeric(hp)
+
+        axle = Axle(
+            joint1=PlungingCVJoint(max_angle=30, plunge_limit=30.0), # Inboard slider
+            joint2=CVJoint(max_angle=30), # Outboard fixed
+            length=float(np.linalg.norm(hp.piv_ob - hp.piv_ib)),
+        )
+
+        self.solver = DoubleAArmNumeric(hp, axle) if isinstance(hp, DoubleAArm) else SemiTrailingLinkNumeric(hp, axle)
         self.shock = Shock.from_config(corner_data, data['shock_max'], data['shock_min'])
         self.wheel = Wheel.from_config(data)

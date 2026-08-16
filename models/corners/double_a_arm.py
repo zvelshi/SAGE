@@ -3,7 +3,6 @@ from __future__ import annotations
 
 # ours
 from models.components.axle import Axle
-from models.components.cv_joint import CVJoint, PlungingCVJoint
 from utils.misc import log_to_file
 
 # third-party
@@ -12,7 +11,7 @@ from scipy.optimize import least_squares
 from scipy.spatial.transform import Rotation as R
 
 class DoubleAArmNumeric:
-    def __init__(self, hp):
+    def __init__(self, hp, axle: Axle):
         self.hp = hp
         self.len = type(hp).link_lengths(hp)
 
@@ -31,11 +30,7 @@ class DoubleAArmNumeric:
         self.axle_static_len = np.linalg.norm(hp.piv_ob - hp.piv_ib)
         self.piv_ob_loc = hp.piv_ob - hp.lbj
 
-        self.axle = Axle(
-            joint1=PlungingCVJoint(max_angle=30, plunge_limit=30.0), # Inboard slider
-            joint2=CVJoint(max_angle=30), # Outboard fixed
-            length=self.axle_static_len
-        )
+        self.axle = axle
 
         # static camber calculation
         spindle_vec = self.hp.wc - self.hp.piv_ob

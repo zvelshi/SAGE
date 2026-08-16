@@ -3,7 +3,6 @@ from typing import Dict
 
 # ours
 from models.components.axle import Axle
-from models.components.cv_joint import CVJoint, PlungingCVJoint
 from utils.misc import log_to_file
 
 # third-party
@@ -12,7 +11,7 @@ from scipy.optimize import least_squares
 from scipy.spatial.transform import Rotation as R
 
 class SemiTrailingLinkNumeric:
-    def __init__(self, hp):
+    def __init__(self, hp, axle: Axle):
         self.hp = hp
         self.len = type(hp).link_lengths(hp)
 
@@ -24,12 +23,7 @@ class SemiTrailingLinkNumeric:
 
         self._tl_f_local = hp.tl_f - hp.wc
 
-        axle_length = self.len["axle_ib_ob_static"]
-        self.axle = Axle(
-            joint1 = PlungingCVJoint(max_angle=30, plunge_limit=25), # Inboard plunges
-            joint2 = CVJoint(max_angle=30), # Outboard is fixed
-            length = axle_length,
-        )
+        self.axle = axle
 
         # static vectors
         self._axle_ob_vec = hp.piv_ob - hp.wc

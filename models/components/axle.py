@@ -58,13 +58,19 @@ class Axle:
         # Plunge Calculation (+ve = extension, -ve = compression)
         extension = current_len - self.length 
 
-        # Helper to calculate true angle
+        # Helper to calculate the joint's operating (bend) angle.
+        # The joint's normal is a directionless axis (a rotation about it, or
+        # about its reverse, is physically identical), so the raw angle
+        # between shaft and normal can land anywhere in [0, 180] depending on
+        # which way the normal happens to point. Fold it into [0, 90] so the
+        # readout always reflects the actual articulation of the joint.
         def get_true_angle(vec, normal):
             v_norm = np.linalg.norm(vec)
             n_norm = np.linalg.norm(normal)
             if v_norm < 1e-9 or n_norm < 1e-9: return 0.0
             dot = np.clip(np.dot(vec/v_norm, normal/n_norm), -1.0, 1.0)
-            return np.arccos(dot)
+            angle = np.arccos(dot)
+            return min(angle, np.pi - angle)
 
         angle_ib = get_true_angle(shaft_vec, n_inboard)
         angle_ob = get_true_angle(-shaft_vec, n_outboard)
