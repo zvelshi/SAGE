@@ -90,7 +90,7 @@ Controls the kinematic sweep parameters.
 ```yaml
 HARDPOINTS: '2026'              # Filename in config/hardpoints/ (e.g. 2026.yml)
 SIM_STEPS:  330                 # Resolution of the sweep
-SIMULATION: 'travel'            # 'steer', 'travel', 'droop_steer', 'jounce_steer', "left_travel", "right_travel", 'extreme', or 'ackermann'
+SIMULATION: 'travel'            # 'steer', 'travel', 'droop_steer', 'jounce_steer', "left_travel", "right_travel", 'sweep_space', 'extreme', or 'ackermann'
 
 HALF: 'front'                   # 'front' or 'rear'
 SIDE: 'right'                   # 'left' or 'right'

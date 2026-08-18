@@ -132,7 +132,7 @@ class SuspensionOptimizer:
         """
          Maps scenario keys to their corresponding classes.
         """
-        if key in ['steer', 'travel', 'droop_steer', 'jounce_steer', "left_travel", "right_travel"]: 
+        if key in ['steer', 'travel', 'droop_steer', 'jounce_steer', "left_travel", "right_travel", "sweep_space"]: 
             return SuspensionSweep
         if key == 'ackermann': 
             return AckermannScenario

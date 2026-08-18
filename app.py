@@ -27,7 +27,7 @@ OPT_PATH = "config/opt_config.yml"
 
 TAB_PATH  = {"kin": KIN_PATH, "dyn": DYN_PATH, "opt": OPT_PATH}
 SIM_TYPES = {
-    "kin": ["travel", "steer", "droop_steer", "jounce_steer", "left_travel", "right_travel", "extreme", "ackermann"],
+    "kin": ["travel", "steer", "droop_steer", "jounce_steer", "left_travel", "right_travel", "sweep_space", "extreme", "ackermann"],
     "dyn": ["static", "shock_dyno"],
     "opt": ["run"],
 }
@@ -362,10 +362,11 @@ def main_page():
 
                 axle_steps = [s["axle_data"] for s in steps if s.get("axle_data")]
                 if axle_steps:
-                    abs_plunge = max(abs(a["plunge_mm"]) for a in axle_steps)
+                    min_plunge = min(a["plunge_mm"] for a in axle_steps)
+                    max_plunge = max(a["plunge_mm"] for a in axle_steps)
                     abs_angle  = max(max(a["angle_ib_deg"], a["angle_ob_deg"]) for a in axle_steps)
-                    stat_pairs.append((f"{half_label} — Absolute Plunge [mm]", f"{abs_plunge:.2f}"))
-                    stat_pairs.append((f"{half_label} — Absolute Max Joint Angle [deg]", f"{abs_angle:.2f}"))
+                    stat_pairs.append((f"{half_label} Plunge Range [mm]", f"{min_plunge:.2f} to {max_plunge:.2f}"))
+                    stat_pairs.append((f"{half_label} Max Joint Angle [deg]", f"{abs_angle:.2f}"))
                 stat_pairs.extend(_build_kin_stats(steps, wr=hp.wr))
 
             cache["xs"] = xs

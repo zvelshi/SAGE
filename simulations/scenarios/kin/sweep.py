@@ -102,4 +102,16 @@ class SuspensionSweep(Scenario):
                 else:
                     log_to_file(f"[WARN] Travel sweep step failed at {t:.2f}mm")
                   
+        elif sim_type == "sweep_space":
+            travel_vals = get_range('TRAVEL')
+            steer_vals = get_range('STEER')
+            for t in travel_vals:
+                for s in steer_vals:
+                    res = self.solver.solve(steer_mm=s, travel_mm=t)
+                    if res:
+                        res['x_val'] = t
+                        res['x_label'] = "Shock Travel [mm]"
+                        steps.append(res)
+                    else:
+                        log_to_file(f"[WARN] Travel sweep step failed at {t:.2f}mm")
         return steps
