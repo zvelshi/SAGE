@@ -16,7 +16,7 @@ from utils.scene3d import (_build_scene, _update_scene, _fit_camera,
                             _build_shock_dyno_scene, _update_shock_dyno_scene, _fit_camera_shock_dyno)
 from utils.plot2d import (_build_kin_figures, _build_ackermann_figures, _build_opt_figures,
                            _move_vline, _build_dyn_figures, _build_dyno_figures,
-                           _build_kin_stats, _build_dyn_stats)
+                           _build_kin_stats, _build_dyn_stats, _build_sweep_space_figures)
 
 # global constants
 FPS = 60
@@ -358,7 +358,7 @@ def main_page():
                 named_figs, xs = _build_ackermann_figures(steps)
             else:
                 half_label = "Rear" if corner_id[1] == 1 else "Front"
-                named_figs, xs = _build_kin_figures(steps, half_label=half_label, wr=hp.wr)
+                named_figs, xs = _build_kin_figures(steps, half_label=half_label, wr=hp.wr, sim_type=sim_type)
 
                 axle_steps = [s["axle_data"] for s in steps if s.get("axle_data")]
                 if axle_steps:
@@ -394,6 +394,14 @@ def main_page():
             _fit_camera(scene3d, steps[-1], sim_type, vehicle, hp)
             _update_scene(scene_objs, steps[0], sim_type, vehicle, hp)
             cache["scene_objs"] = scene_objs
+
+            # 3D data plots
+            if sim_type == "sweep_space":
+                sweep_figs = _build_sweep_space_figures(steps)
+                with ui.grid(columns=2 if len(sweep_figs) >= 2 else len(sweep_figs)).classes("w-full gap-2"):
+                    for key, fig in sweep_figs:
+                        pel = ui.plotly(fig).classes("w-full")
+                        _add_display_item(key.replace("_", " ").title(), pel, default_visible=True, category="3d")
 
             # 2D plots
             ncols = 3 if len(named_figs) >= 3 else len(named_figs)

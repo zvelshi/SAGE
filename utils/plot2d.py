@@ -126,7 +126,7 @@ def _build_dyno_figures(steps: list) -> tuple[list[tuple[str, Any]], list[float]
 
     return named_figs, t
 
-def _build_kin_figures(steps, half_label="Front", wr=0.0):
+def _build_kin_figures(steps, half_label="Front", wr=0.0, sim_type=None):
     atts = [get_wheel_attitude(s) for s in steps]
     plunge, a_ib, a_ob = [], [], []
     for s in steps:
@@ -157,7 +157,7 @@ def _build_kin_figures(steps, half_label="Front", wr=0.0):
 
     motion_ratio = motion_ratio_series(steps, wr=wr)
 
-    return [
+    figs = [
         ("camber", mfig("Camber [°]",
             [go.Scatter(x=xs, y=[a["camber"] for a in atts],
                         mode="lines", line=dict(color=_COLORS[0], width=2))])),
@@ -170,16 +170,59 @@ def _build_kin_figures(steps, half_label="Front", wr=0.0):
         ("motion_ratio", mfig(f"Motion Ratio — {half_label} [-]",
                     [go.Scatter(x=xs, y=motion_ratio.tolist(),
                                 mode="lines", line=dict(color=_COLORS[5], width=2))])),
-        ("plunge", mfig("Axle Plunge [mm]",
+    ]
+
+    if sim_type != "sweep_space":
+        figs.append(("plunge", mfig("Axle Plunge [mm]",
             [go.Scatter(x=xs, y=plunge,
-                        mode="lines", line=dict(color=_COLORS[3], width=2))])),
-        ("cv",     mfig("CV Angles [°]", [
+                        mode="lines", line=dict(color=_COLORS[3], width=2))])))
+        figs.append(("cv",     mfig("CV Angles [°]", [
             go.Scatter(x=xs, y=a_ib, mode="lines", name="Inboard",
                        line=dict(color=_COLORS[4], width=2)),
             go.Scatter(x=xs, y=a_ob, mode="lines", name="Outboard",
                        line=dict(color=_COLORS[4], width=2, dash="dash")),
-        ], show_legend=True)),
-    ], xs
+        ], show_legend=True)))
+
+    return figs, xs
+
+def _build_sweep_space_figures(steps):
+    """Build 3D surface plots (shock travel x rack travel) of CV plunge and joint angle."""
+    travel_u = sorted({round(s.get("travel_mm", 0.0), 6) for s in steps})
+    steer_u = sorted({round(s.get("steer_mm", 0.0), 6) for s in steps})
+    t_idx = {v: i for i, v in enumerate(travel_u)}
+    s_idx = {v: i for i, v in enumerate(steer_u)}
+
+    plunge_grid = np.full((len(travel_u), len(steer_u)), np.nan)
+    angle_grid = np.full((len(travel_u), len(steer_u)), np.nan)
+
+    for s in steps:
+        i = t_idx[round(s.get("travel_mm", 0.0), 6)]
+        j = s_idx[round(s.get("steer_mm", 0.0), 6)]
+        d = s.get("axle_data") or {}
+        plunge_grid[i, j] = d.get("plunge_mm", np.nan)
+        ib, ob = d.get("angle_ib_deg", np.nan), d.get("angle_ob_deg", np.nan)
+        angle_grid[i, j] = max(ib, ob)
+
+    def surf(title, z, colorscale):
+        f = go.Figure(data=[go.Surface(x=steer_u, y=travel_u, z=z,
+                                        colorscale=colorscale, showscale=False)])
+        f.update_layout(
+            title=dict(text=title, font=dict(size=11)),
+            scene=dict(
+                xaxis_title="Rack Travel [mm]",
+                yaxis_title="Shock Travel [mm]",
+                zaxis_title=title,
+            ),
+            margin=dict(l=6, r=6, t=30, b=6),
+            height=420,
+            template="plotly_white",
+        )
+        return f
+
+    return [
+        ("plunge_3d", surf("CV Plunge [mm]", plunge_grid, "Greens")),
+        ("cv_3d", surf("CV Joint Angle [°]", angle_grid, "Tealgrn")),
+    ]
 
 def _build_kin_stats(steps, wr=0.0):
     """Static (0mm shock travel / 0mm steer) value cards for a corner kinematic sweep."""
