@@ -10,11 +10,6 @@ import numpy as np
 # ours
 from simulations.scenarios.base import Scenario
 from utils.misc import log_to_file
-from utils.dynamics import (
-    derivatives, euler_step, solve_all_corners, build_step_dict, initial_shock_lengths,
-    CORNERS_ATTR, IDX_Z_COG, IDX_PHI, IDX_THETA, IDX_DZ_COG, IDX_DPHI, IDX_DTHETA,
-    IDX_Z_WU, IDX_DZ_WU,
-)
 
 def _noop_progress(*_): pass
 

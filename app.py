@@ -27,7 +27,7 @@ OPT_PATH = "config/opt_config.yml"
 
 TAB_PATH  = {"kin": KIN_PATH, "dyn": DYN_PATH, "opt": OPT_PATH}
 SIM_TYPES = {
-    "kin": ["travel", "steer", "droop_steer", "jounce_steer", "extreme", "ackermann"],
+    "kin": ["travel", "steer", "droop_steer", "jounce_steer", "left_travel", "right_travel", "extreme", "ackermann"],
     "dyn": ["static", "shock_dyno"],
     "opt": ["run"],
 }

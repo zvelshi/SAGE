@@ -40,7 +40,7 @@ class SuspensionSweep(Scenario):
             steer_vals = get_range('STEER')
             for s in steer_vals:
                 res = self.solver.solve(steer_mm=s, bump_z=0.0)
-                if res: 
+                if res:
                     res['x_val'] = s
                     res['x_label'] = "Rack Travel [mm]"
                     steps.append(res)
@@ -51,30 +51,18 @@ class SuspensionSweep(Scenario):
             travel_vals = get_range('TRAVEL')
             for t in travel_vals:
                 res = self.solver.solve(steer_mm=0.0, travel_mm=t)
-                if res: 
+                if res:
                     res['x_val'] = t
                     res['x_label'] = "Shock Travel [mm]"
                     steps.append(res)
                 else:
                     log_to_file(f"[WARN] Travel sweep step failed at {t:.2f}mm")
 
-        elif sim_type == "steer_travel":
-             s_vals = get_range('STEER')
-             t_vals = get_range('TRAVEL')
-             for s, t in zip(s_vals, t_vals):
-                res = self.solver.solve(steer_mm=s, travel_mm=t)
-                if res: 
-                    res['x_val'] = t # Default X-axis to travel for combined sweeps
-                    res['x_label'] = "Shock Travel [mm] (with Steer)"
-                    steps.append(res)
-                else:
-                    log_to_file(f"[WARN] Combined sweep step failed at steer={s:.2f}, travel={t:.2f}")
-
         elif sim_type == "droop_steer":
             steer_vals = get_range('STEER')
             for s in steer_vals:
                 res = self.solver.solve(steer_mm=s, travel_mm=self.config["TRAVEL"]["MIN"])
-                if res: 
+                if res:
                     res['x_val'] = s
                     res['x_label'] = "Rack Travel [mm]"
                     steps.append(res)
@@ -85,11 +73,33 @@ class SuspensionSweep(Scenario):
             steer_vals = get_range('STEER')
             for s in steer_vals:
                 res = self.solver.solve(steer_mm=s, travel_mm=self.config["TRAVEL"]["MAX"])
-                if res: 
+                if res:
                     res['x_val'] = s
                     res['x_label'] = "Rack Travel [mm]"
                     steps.append(res)
                 else:
                     log_to_file(f"[WARN] Steer sweep step failed at {s:.2f}mm")
+
+        elif sim_type == "left_travel":
+            travel_vals = get_range('TRAVEL')
+            for t in travel_vals:
+                res = self.solver.solve(steer_mm=self.config["STEER"]["MIN"], travel_mm=t)
+                if res:
+                    res['x_val'] = t
+                    res['x_label'] = "Shock Travel [mm]"
+                    steps.append(res)
+                else:
+                    log_to_file(f"[WARN] Travel sweep step failed at {t:.2f}mm")
+
+        elif sim_type == "right_travel":
+            travel_vals = get_range('TRAVEL')
+            for t in travel_vals:
+                res = self.solver.solve(steer_mm=self.config["STEER"]["MAX"], travel_mm=t)
+                if res:
+                    res['x_val'] = t
+                    res['x_label'] = "Shock Travel [mm]"
+                    steps.append(res)
+                else:
+                    log_to_file(f"[WARN] Travel sweep step failed at {t:.2f}mm")
                   
         return steps

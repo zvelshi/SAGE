@@ -15,7 +15,7 @@ class OptimizationObjective(ABC):
 
     @abstractmethod
     def get_scenario_type(self) -> str:
-        """Returns the key of the scenario class to run ('steer', 'travel', 'steer_travel', 'ackermann')."""
+        """Returns the key of the scenario class to run ('steer', 'travel', 'ackermann')."""
         pass
 
     @property
