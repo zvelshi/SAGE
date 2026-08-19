@@ -64,6 +64,9 @@ class SuspensionProblem(ElementwiseProblem):
 
         out["F"] = np.array(costs)
 
+        self.opt.all_X.append(np.array(x, dtype=float))
+        self.opt.all_F.append(np.array(costs, dtype=float))
+
         c_str = ", ".join([f"{c:.6f}" for c in costs])
         log_to_file(f"  -> Result Costs: [{c_str}]")
 
@@ -85,6 +88,10 @@ class SuspensionOptimizer:
 
         self.pareto_front = None
         self.pareto_set = None
+
+        # every design ever evaluated during the run (not just the final non-dominated front)
+        self.all_X: List[np.ndarray] = []
+        self.all_F: List[np.ndarray] = []
 
         self._parse_config_bounds()
 

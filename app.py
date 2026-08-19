@@ -13,10 +13,15 @@ from nicegui import ui, run
 from utils.sim_runners import _run_kin, _run_opt, _run_dyn
 from utils.scene3d import (_build_scene, _update_scene, _fit_camera,
                             _build_dyn_scene, _update_dyn_scene, _fit_camera_dyn,
-                            _build_shock_dyno_scene, _update_shock_dyno_scene, _fit_camera_shock_dyno)
+                            _build_shock_dyno_scene, _update_shock_dyno_scene, _fit_camera_shock_dyno,
+                            _build_config_preview_scene, build_legend_entries, _FREE_POINT_COLOR,
+                            _resolve_point_attr)
 from utils.plot2d import (_build_kin_figures, _build_ackermann_figures, _build_opt_figures,
                            _move_vline, _build_dyn_figures, _build_dyno_figures,
-                           _build_kin_stats, _build_dyn_stats, _build_sweep_space_figures)
+                           _build_kin_stats, _build_dyn_stats, _build_sweep_space_figures,
+                           rank_solutions)
+from models.vehicle import Vehicle
+from utils.misc import add_console_subscriber, remove_console_subscriber
 
 # global constants
 FPS = 60
@@ -64,7 +69,7 @@ def main_page():
     with ui.row().classes("w-full gap-0").style("height:100vh;overflow:hidden"):
 
         with ui.column().classes("border-r border-stone-300").style(
-            "width:400px;min-width:400px;height:100vh;display:flex;"
+            "width:37.5vw;min-width:37.5vw;height:100vh;display:flex;"
             "flex-direction:column;overflow:hidden"
         ):
             with ui.row().classes("items-center gap-2 px-3 py-2 bg-stone-900").style("flex-shrink:0"):
@@ -133,6 +138,8 @@ def main_page():
                 mode_sel = ui.select(list(SIM_TYPES), value="kin",  label="Mode").classes("w-20").props("dense outlined")
                 subtype_sel = ui.select(SIM_TYPES["kin"], value=SIM_TYPES["kin"][0], label="Type").classes("w-36").props("dense outlined")
                 save_btn = ui.button("Save").props("unelevated dense").classes("bg-stone-700 text-white text-sm px-3")
+                preview_btn = ui.button("Preview", icon="visibility").props("outline dense").classes("text-stone-700 border-stone-300 text-sm px-3")
+                preview_btn.visible = False
                 run_btn  = ui.button("Run" ).props("unelevated dense").classes("bg-emerald-600 text-white text-sm px-3")
 
         with ui.column().style("flex:1;height:100vh;display:flex;flex-direction:column;overflow:hidden;background:#f8fafc"):
@@ -174,6 +181,7 @@ def main_page():
         type_ref["v"]       = opts[0]
         tabs.set_value(e.value)
         active_tab["v"] = e.value
+        preview_btn.visible = (e.value == "opt")
 
     def on_type_change(e):
         type_ref["v"] = e.value
@@ -200,23 +208,28 @@ def main_page():
         progress.visible = True
         progress.set_value(0)
         status_lbl.text  = f"Running {mode} / {sim_type}…"
-        viz_area.clear()
         _reset_display_items()
         cache["named_figs"].clear(); cache["plot_elems"].clear()
         cache["steps"] = []; cache["scene_objs"] = None
         cache["xs"] = []
+
+        _start_console()
 
         try:
             if mode == "kin":
                 result = await run.io_bound(_run_kin, editors["kin"].value, sim_type)
                 progress.set_value(0.85)
                 await asyncio.sleep(0)
+                _stop_console()
+                viz_area.clear()
                 _render_kin(result)
 
             elif mode == "opt":
                 result = await run.io_bound(_run_opt, editors["kin"].value, editors["opt"].value)
                 progress.set_value(0.85)
                 await asyncio.sleep(0)
+                _stop_console()
+                viz_area.clear()
                 _render_opt(result)
 
             elif mode == "dyn":
@@ -227,6 +240,8 @@ def main_page():
                 dyn_poll_timer.active = False
                 progress.set_value(0.95)
                 await asyncio.sleep(0)
+                _stop_console()
+                viz_area.clear()
                 _render_dyn(result)
 
             progress.set_value(1.0)
@@ -241,6 +256,7 @@ def main_page():
             with viz_area:
                 ui.label(traceback.format_exc()).classes("text-red-500 text-xs font-mono whitespace-pre-wrap")
         finally:
+            _stop_console()
             rtask["task"]    = None
             spinner.visible  = False
             progress.visible = False
@@ -302,7 +318,44 @@ def main_page():
 
     dyn_poll_timer = ui.timer(0.25, _poll_dyn_progress, active=False)
 
-    # result renderers 
+    # live console output shown in viz_area while a run is in progress
+    console_state = {"lines": [], "pushed": 0}
+    console_ref   = {"log": None}
+
+    def _on_console_line(line: str) -> None:
+        console_state["lines"].append(line)
+
+    def _poll_console():
+        log_widget = console_ref["log"]
+        if log_widget is None:
+            return
+        lines = console_state["lines"]
+        n = len(lines)
+        if n > console_state["pushed"]:
+            for line in lines[console_state["pushed"]:n]:
+                log_widget.push(line)
+            console_state["pushed"] = n
+
+    console_poll_timer = ui.timer(0.2, _poll_console, active=False)
+
+    def _start_console():
+        console_state["lines"].clear()
+        console_state["pushed"] = 0
+        viz_area.clear()
+        with viz_area:
+            console_ref["log"] = ui.log(max_lines=4000).classes("w-full").style(
+                "flex:1;min-height:300px;background:#111827;color:#d1d5db;"
+                "font-family:Consolas,monospace;font-size:12px;border-radius:6px;padding:8px;"
+            )
+        add_console_subscriber(_on_console_line)
+        console_poll_timer.active = True
+
+    def _stop_console():
+        console_poll_timer.active = False
+        remove_console_subscriber(_on_console_line)
+        console_ref["log"] = None
+
+    # result renderers
     def _setup_scrubber(n):
         play_btn.props("icon=play_arrow")
         play_btn.visible = True
@@ -335,6 +388,84 @@ def main_page():
                         it["element"].visible = e.value
                     ui.checkbox(item["label"], value=item["default"]).on_value_change(_on_change).classes("ml-1")
         edit_display_btn.visible = bool(display_items)
+
+    def _fit_preview_camera(scene, hp):
+        pts = [np.asarray(getattr(hp, a)) for a in
+               ("ubj", "lbj", "wc", "tr_ob", "s_ob", "ucl_ob", "lcl_ob") if hasattr(hp, a)]
+        if not pts:
+            return
+        arr  = np.array(pts) / 1000.0
+        ctr  = arr.mean(axis=0)
+        span = float(np.max(arr.max(axis=0) - arr.min(axis=0)))
+        dist = span * 1.9
+        scene.move_camera(
+            x=float(ctr[0]) + dist * 0.4, y=float(ctr[1]) - dist * 1.1, z=float(ctr[2]) + dist * 0.7,
+            look_at_x=float(ctr[0]), look_at_y=float(ctr[1]), look_at_z=float(ctr[2]),
+            up_x=0, up_y=0, up_z=1,
+        )
+
+    def _render_legend(keepout_cfg, groups_cfg=None):
+        with ui.column().classes("gap-1 p-2 bg-white/90 rounded shadow").style(
+            "position:absolute; top:8px; right:8px; z-index:10;"
+        ):
+            ui.label("Legend").classes("text-xs font-bold text-stone-700")
+            with ui.row().classes("items-center gap-1"):
+                ui.element("div").style(f"width:10px;height:10px;background:{_FREE_POINT_COLOR};opacity:0.6;border-radius:2px")
+                ui.label("Free Variable Range").classes("text-xs text-stone-600")
+            for label, color in build_legend_entries(keepout_cfg, groups_cfg):
+                with ui.row().classes("items-center gap-1"):
+                    ui.element("div").style(f"width:10px;height:10px;background:{color};opacity:0.6;border-radius:2px")
+                    ui.label(label).classes("text-xs text-stone-600")
+
+    def _corner_for(vehicle, cfg):
+        corner_id = [1 if cfg.get("SIDE") == "right" else 0, 1 if cfg.get("HALF") == "rear" else 0]
+        return vehicle.get_corner_from_id(corner_id)
+
+    def do_preview():
+        try:
+            kin_cfg = yaml.safe_load(editors["kin"].value)
+            opt_cfg = yaml.safe_load(editors["opt"].value)
+        except yaml.YAMLError as exc:
+            ui.notify(f"YAML error: {exc}", type="negative"); return
+        if not kin_cfg or not isinstance(kin_cfg, dict):
+            ui.notify("Invalid kinematic config.", type="negative"); return
+
+        hp_name = kin_cfg.get("HARDPOINTS")
+        hp_path = f"config/hardpoints/{hp_name}.yml"
+        if not os.path.exists(hp_path):
+            ui.notify(f"Hardpoints file not found: {hp_path}", type="negative"); return
+
+        try:
+            with open(hp_path) as f:
+                hp_data = yaml.safe_load(f)
+            vehicle = Vehicle(hp_data)
+        except Exception as exc:
+            ui.notify(f"Failed to build vehicle: {exc}", type="negative"); return
+
+        hp = _corner_for(vehicle, kin_cfg).hardpoints
+        free_points_cfg = (opt_cfg or {}).get("FREE_POINTS", {})
+        keepout_cfg = (opt_cfg or {}).get("KEEPOUT_ZONES", [])
+        groups_cfg = (opt_cfg or {}).get("COLLISION_GROUPS")
+
+        viz_area.clear()
+        _reset_display_items()
+        cache["scene_objs"] = None
+        cache["steps"] = []
+
+        with viz_area:
+            ui.label("Optimizer Preview — free-variable ranges & keepout zones").classes(
+                "font-bold text-base text-emerald-800")
+            with ui.card().classes("w-full p-0 overflow-hidden").style("flex-shrink:0"):
+                with ui.row().classes("items-center px-3 py-1 bg-stone-100 border-b border-stone-200"):
+                    ui.label("3D Preview").classes("text-sm font-semibold text-stone-700")
+                    ui.label("drag to rotate · scroll to zoom · right-drag to pan").classes("text-xs text-stone-400 ml-2")
+                with ui.element("div").style("position:relative;width:100%"):
+                    scene3d = ui.scene(width=900, height=460, background_color="#f0f4f8", grid=(10, 100)).classes("w-full")
+                    _render_legend(keepout_cfg, groups_cfg)
+
+        _build_config_preview_scene(scene3d, hp, free_points_cfg, keepout_cfg, groups_cfg)
+        _fit_preview_camera(scene3d, hp)
+        status_lbl.text = "Preview ready — configure and press Run to optimize."
 
     def _render_kin(result):
         sim_type, steps, vehicle, cfg, corner_id, run_dir = result
@@ -539,6 +670,7 @@ def main_page():
     def _render_opt(result):
         res, optimizer, cfg, run_dir = result
         F = res.F
+        X = res.X
         obj_names = [o.name for o in optimizer.objectives]
 
         with viz_area:
@@ -546,23 +678,91 @@ def main_page():
                 ui.label("Optimization failed.").classes("text-red-500 text-sm"); return
             if F.ndim == 1:
                 F = F.reshape(-1, 1)
-            F = F[np.all(F <= 1e2, axis=1)]
+            if X is not None and X.ndim == 1:
+                X = X.reshape(1, -1)
+
+            mask = np.all(F <= 1e2, axis=1)
+            F = F[mask]
+            X = X[mask] if X is not None else None
             if not len(F):
                 ui.label("No feasible solutions found.").classes("text-orange-500 text-sm"); return
 
-            ui.label(f"Pareto front — {len(F)} solutions").classes("font-bold text-base text-emerald-800")
-            with ui.column().classes("gap-0.5"):
-                for i, row in enumerate(F[:10]):
-                    s = ",  ".join(f"{n}: {v:.4f}" for n, v in zip(obj_names, row))
-                    ui.label(f"Sol {i:2d}:  {s}").classes("text-xs font-mono text-stone-600")
+            F_all = np.array(optimizer.all_F) if optimizer.all_F else F.copy()
+            if F_all.ndim == 1:
+                F_all = F_all.reshape(-1, 1)
+            mask_all = np.all(F_all <= 1e2, axis=1)
+            F_all = F_all[mask_all] if mask_all.any() else F
 
-            for _, fig in _build_opt_figures(F, obj_names):
+            ui.label(f"Pareto front — {len(F)} solutions (of {len(F_all)} evaluated)").classes(
+                "font-bold text-base text-emerald-800")
+
+            for _, fig in _build_opt_figures(F_all, F, obj_names):
                 ui.plotly(fig).classes("w-full")
+
+            if X is None or not len(X):
+                return
+
+            order = rank_solutions(F)
+
+            def sol_label(i):
+                s = ", ".join(f"{n}: {v:.4f}" for n, v in zip(obj_names, F[i]))
+                return f"Sol {i} — {s}"
+
+            options = {int(i): sol_label(int(i)) for i in order}
+            default_idx = int(order[0])
+
+            sol_viz = ui.column().classes("w-full gap-2")
+
+            def render_solution(idx: int):
+                sol_viz.clear()
+                with sol_viz:
+                    with ui.card().classes("w-full p-0 overflow-hidden").style("flex-shrink:0"):
+                        with ui.row().classes("items-center px-3 py-1 bg-stone-100 border-b border-stone-200"):
+                            ui.label("3D View — Selected Solution").classes("text-sm font-semibold text-stone-700")
+                            ui.label("drag to rotate · scroll to zoom · right-drag to pan").classes("text-xs text-stone-400 ml-2")
+                        with ui.element("div").style("position:relative;width:100%"):
+                            scene3d = ui.scene(width=900, height=460, background_color="#f0f4f8", grid=(10, 100)).classes("w-full")
+                            _render_legend(cfg.get("KEEPOUT_ZONES", []), cfg.get("COLLISION_GROUPS"))
+
+                    vehicle = optimizer.create_vehicle_from_ref(X[idx])
+                    hp = _corner_for(vehicle, cfg).hardpoints
+                    _build_config_preview_scene(scene3d, hp, cfg.get("FREE_POINTS", {}), cfg.get("KEEPOUT_ZONES", []),
+                                                 cfg.get("COLLISION_GROUPS"))
+                    _fit_preview_camera(scene3d, hp)
+
+                    free_points_cfg = cfg.get("FREE_POINTS", {})
+                    if free_points_cfg:
+                        ui.label("Free Point Positions").classes("font-bold text-sm text-stone-700 mt-1")
+                        rows = []
+                        for pt_name in free_points_cfg:
+                            attr = _resolve_point_attr(hp, pt_name)
+                            if attr is None:
+                                continue
+                            x, y, z = (float(v) for v in getattr(hp, attr))
+                            rows.append({"point": pt_name, "x": f"{x:.3f}", "y": f"{y:.3f}", "z": f"{z:.3f}"})
+                        if rows:
+                            ui.table(
+                                columns=[
+                                    {"name": "point", "label": "Point", "field": "point", "align": "left"},
+                                    {"name": "x", "label": "X [mm]", "field": "x", "align": "right"},
+                                    {"name": "y", "label": "Y [mm]", "field": "y", "align": "right"},
+                                    {"name": "z", "label": "Z [mm]", "field": "z", "align": "right"},
+                                ],
+                                rows=rows,
+                            ).classes("text-xs w-full").props("dense flat")
+
+            with ui.row().classes("w-full items-center gap-2"):
+                ui.label("Viewing solution:").classes("text-sm text-stone-600")
+                sol_select = ui.select(options=options, value=default_idx).classes("w-96").props("dense outlined")
+            sol_select.on_value_change(lambda e: render_solution(int(e.value)))
+
+            render_solution(default_idx)
 
     # wire
     mode_sel.on_value_change(on_mode_change)
     subtype_sel.on_value_change(on_type_change)
     save_btn.on_click(do_save)
+    preview_btn.on_click(do_preview)
     run_btn.on_click(do_run)
     play_btn.on_click(do_play_pause)
 

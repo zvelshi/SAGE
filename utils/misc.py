@@ -6,6 +6,18 @@ import shutil
 import pandas as pd
 import yaml
 
+# Subscribers are notified with each completed line written via DualLogger,
+# independent of any particular DualLogger instance (so a UI can subscribe
+# before the first run has ever created one).
+_console_subscribers: list = []
+
+def add_console_subscriber(fn) -> None:
+    _console_subscribers.append(fn)
+
+def remove_console_subscriber(fn) -> None:
+    if fn in _console_subscribers:
+        _console_subscribers.remove(fn)
+
 class DualLogger(object):
     """
     Writes to both the terminal and a log file simultaneously.
@@ -31,6 +43,11 @@ class DualLogger(object):
                 for line in lines[:-1]:
                     timestamp = datetime.datetime.now().strftime("[%H:%M:%S]")
                     self.log.write(f"{timestamp} [INFO]  {line}\n")
+                    for sub in list(_console_subscribers):
+                        try:
+                            sub(line)
+                        except Exception:
+                            pass
                 self.buffer = lines[-1]
                 self.log.flush()
 

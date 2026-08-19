@@ -103,6 +103,6 @@ def _run_opt(kin_text: str, opt_text: str):
     with open(f"config/hardpoints/{kin_cfg['HARDPOINTS']}.yml") as f:
         hp_data = yaml.safe_load(f)
     cfg = {**kin_cfg, **opt_cfg}
-    objectives = [getattr(opt_objs, n)() for n in cfg.get("OBJECTIVES", [])]
+    objectives = [getattr(opt_objs, n)(config=cfg) for n in cfg.get("OBJECTIVES", [])]
     optimizer = SuspensionOptimizer(hp_data, cfg, objectives)
     return optimizer.run(), optimizer, cfg, run_dir

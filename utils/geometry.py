@@ -5,6 +5,45 @@ from typing import Dict
 import numpy as np
 from scipy.spatial.transform import Rotation as _Rot
 
+def segment_segment_distance(p1: np.ndarray, p2: np.ndarray,
+                              q1: np.ndarray, q2: np.ndarray) -> float:
+    """Closest distance between segment p1-p2 and segment q1-q2 (3-D)."""
+    p1, p2, q1, q2 = (np.asarray(v, float) for v in (p1, p2, q1, q2))
+    d1 = p2 - p1
+    d2 = q2 - q1
+    r  = p1 - q1
+
+    a = np.dot(d1, d1)
+    e = np.dot(d2, d2)
+    f = np.dot(d2, r)
+
+    if a <= 1e-12 and e <= 1e-12:
+        return float(np.linalg.norm(r))
+
+    if a <= 1e-12:
+        s = 0.0
+        t = np.clip(f / e, 0.0, 1.0)
+    else:
+        c = np.dot(d1, r)
+        if e <= 1e-12:
+            t = 0.0
+            s = np.clip(-c / a, 0.0, 1.0)
+        else:
+            b = np.dot(d1, d2)
+            denom = a * e - b * b
+            s = np.clip((b * f - c * e) / denom, 0.0, 1.0) if denom > 1e-12 else 0.0
+            t = (b * s + f) / e
+            if t < 0.0:
+                t = 0.0
+                s = np.clip(-c / a, 0.0, 1.0)
+            elif t > 1.0:
+                t = 1.0
+                s = np.clip((b - c) / a, 0.0, 1.0)
+
+    closest_p = p1 + s * d1
+    closest_q = q1 + t * d2
+    return float(np.linalg.norm(closest_p - closest_q))
+
 def get_wheel_attitude(step: Dict[str, np.ndarray]) -> Dict[str, float]:
     return {
         "camber": get_camber_angle(step), 

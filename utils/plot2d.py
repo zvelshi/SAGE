@@ -278,41 +278,119 @@ def _build_ackermann_figures(steps):
                     shapes=[_vline_shape(xs[0])])
     return [("ackermann_pct", f)], xs
 
-def _build_opt_figures(F, obj_names):
-    n = F.shape[1]
+def rank_solutions(F: np.ndarray) -> np.ndarray:
+    """Return indices into F sorted best-first, by normalized Euclidean distance
+    to the ideal point (0,...,0) across all objectives. Works for any n_obj >= 1."""
+    Fn = (F - F.min(0)) / (np.ptp(F, 0) + 1e-9)
+    scores = np.linalg.norm(Fn, axis=1)
+    return np.argsort(scores)
+
+def _pareto_hull_2d(F_front: np.ndarray):
+    """Smooth filled curve tracing the sorted Pareto front (2 objectives)."""
+    if len(F_front) < 3:
+        return None
+    order = np.argsort(F_front[:, 0])
+    x, y = F_front[order, 0], F_front[order, 1]
+    return go.Scatter(x=x, y=y, mode="lines",
+                       line=dict(color=_COLORS[0], width=2, shape="spline", smoothing=1.0),
+                       fill="tozeroy", fillcolor="rgba(5,150,105,0.10)",
+                       name="Pareto Hull", hoverinfo="skip")
+
+def _pareto_hull_3d(F_front: np.ndarray):
+    """Smooth continuous surface interpolated over the Pareto front points,
+    clipped to the convex hull of their (x, y) projection (3 objectives)."""
+    from scipy.interpolate import griddata
+    from scipy.spatial import Delaunay, QhullError
+
+    if len(F_front) < 4:
+        return None
+    x, y, z = F_front[:, 0], F_front[:, 1], F_front[:, 2]
+    if np.ptp(x) < 1e-12 or np.ptp(y) < 1e-12:
+        return None
+
+    res = 40
+    xi = np.linspace(x.min(), x.max(), res)
+    yi = np.linspace(y.min(), y.max(), res)
+    XI, YI = np.meshgrid(xi, yi)
+
+    try:
+        ZI = griddata((x, y), z, (XI, YI), method="cubic")
+    except Exception:
+        ZI = griddata((x, y), z, (XI, YI), method="linear")
+
+    try:
+        hull = Delaunay(np.column_stack([x, y]))
+        outside = hull.find_simplex(np.column_stack([XI.ravel(), YI.ravel()])) < 0
+        ZI = ZI.ravel()
+        ZI[outside] = np.nan
+        ZI = ZI.reshape(XI.shape)
+    except QhullError:
+        pass
+
+    if np.all(np.isnan(ZI)):
+        return None
+
+    return go.Surface(x=XI, y=YI, z=ZI, opacity=0.35, colorscale="Greens",
+                       showscale=False, name="Pareto Hull", hoverinfo="skip")
+
+def _build_opt_figures(F_all, F_front, obj_names):
+    """F_all: every design evaluated during the run. F_front: the final
+    non-dominated Pareto front (subset of F_all)."""
+    n = F_front.shape[1]
     if n == 1:
-        f = go.Figure([go.Histogram(x=F.flatten(), nbinsx=25,
+        f = go.Figure([go.Histogram(x=F_all.flatten(), nbinsx=25,
                                      marker_color=_COLORS[0], opacity=0.85)])
-        f.add_vline(x=float(F.min()), line_color="red", line_dash="dash",
-                    annotation_text=f"Best: {F.min():.4f}")
+        f.add_vline(x=float(F_front.min()), line_color="red", line_dash="dash",
+                    annotation_text=f"Best: {F_front.min():.4f}")
         f.update_layout(**{**_LAYOUT_BASE, "height": 340},
-                         title=f"Objective: {obj_names[0]}",
+                         title=f"Objective: {obj_names[0]} ({len(F_all)} evaluated)",
                          xaxis_title="Cost", yaxis_title="Count")
     elif n == 2:
-        Fn   = (F - F.min(0)) / (np.ptp(F, 0) + 1e-9)
+        Fn   = (F_front - F_front.min(0)) / (np.ptp(F_front, 0) + 1e-9)
         best = int(np.argmin(np.linalg.norm(Fn, axis=1)))
-        f = go.Figure([
-            go.Scatter(x=F[:,0], y=F[:,1], mode="markers",
-                       marker=dict(size=8, color=_COLORS[0], opacity=0.75,
+        traces = []
+        hull = _pareto_hull_2d(F_front)
+        if hull is not None:
+            traces.append(hull)
+        traces.extend([
+            go.Scatter(x=F_all[:,0], y=F_all[:,1], mode="markers",
+                       marker=dict(size=5, color="#9ca3af", opacity=0.45),
+                       name=f"All Evaluated ({len(F_all)})"),
+            go.Scatter(x=F_front[:,0], y=F_front[:,1], mode="markers",
+                       marker=dict(size=8, color=_COLORS[0], opacity=0.9,
                                    line=dict(width=1, color="white")),
-                       name="Pareto"),
-            go.Scatter(x=[F[best,0]], y=[F[best,1]], mode="markers",
+                       name="Pareto Front"),
+            go.Scatter(x=[F_front[best,0]], y=[F_front[best,1]], mode="markers",
                        marker=dict(size=14, symbol="star", color="red"),
                        name="Best balance"),
         ])
+        f = go.Figure(traces)
         f.update_layout(**{**_LAYOUT_BASE, "height": 380},
                          title="Pareto Front",
                          xaxis_title=obj_names[0], yaxis_title=obj_names[1],
                          showlegend=True)
     else:
-        f = go.Figure([go.Scatter3d(
-            x=F[:,0], y=F[:,1], z=F[:,2], mode="markers",
-            marker=dict(size=5, color=F[:,2], colorscale="Viridis",
+        traces = []
+        surface = _pareto_hull_3d(F_front)
+        if surface is not None:
+            traces.append(surface)
+        traces.append(go.Scatter3d(
+            x=F_all[:,0], y=F_all[:,1], z=F_all[:,2], mode="markers",
+            marker=dict(size=3, color="#9ca3af", opacity=0.35),
+            name=f"All Evaluated ({len(F_all)})",
+        ))
+        traces.append(go.Scatter3d(
+            x=F_front[:,0], y=F_front[:,1], z=F_front[:,2], mode="markers",
+            marker=dict(size=5, color=F_front[:,2], colorscale="Viridis",
                         showscale=True,
-                        colorbar=dict(title=obj_names[2], thickness=12))
-        )])
+                        colorbar=dict(title=obj_names[2], thickness=12),
+                        line=dict(width=1, color="white")),
+            name="Pareto Front",
+        ))
+        f = go.Figure(traces)
         f.update_layout(height=480, title="Pareto Front (3D)",
                          margin=dict(l=0, r=0, t=40, b=0),
+                         showlegend=True,
                          scene=dict(xaxis_title=obj_names[0],
                                     yaxis_title=obj_names[1],
                                     zaxis_title=obj_names[2]))

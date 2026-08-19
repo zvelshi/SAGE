@@ -1,18 +1,18 @@
 # GLOBAL OPTIMIZER
-POP_SIZE: 35
-N_OFFSPRINGS: 25
-MAX_GEN: 25
+POP_SIZE: 75
+N_OFFSPRINGS: 75
+MAX_GEN: 40
 M_PROB: 1.0
 M_ETA: 15
 
 # OPTIMIZATION TO RUN
-OBJECTIVES: 
+OBJECTIVES:
   - MinimumBumpSteer
   - ParallelSteer
-  - NoCollision
+  - PointToPointCollision
 
 # PARAMETERS TO OPTIMIZE
-FREE_POINTS: 
+FREE_POINTS:
   "tie_rod_inboard":
     x: [-50.0, 10.0]
     y: [-50.0, 50.0]
@@ -21,3 +21,40 @@ FREE_POINTS:
     x: [-20.0, 15.0]
     y: [-50.0, 50.0]
     z: [-50.0, 50.0]
+
+# SCENARIO USED TO EVALUATE PointToPointCollision (default: droop_steer)
+COLLISION_SCENARIO: "droop_steer"
+
+# KEEPOUT ZONES: shapes extruded along the axis between point_a -> point_b.
+# At least 2 zones are required for collisions to be detected.
+#   shape: "cylinder" -> dim1 = radius (mm)
+#   shape: "box"      -> dim1 = side length 1 (mm), dim2 = side length 2 (mm)
+KEEPOUT_ZONES:
+  - name: "tierod"
+    point_a: "tr_ib"
+    point_b: "tr_ob"
+    shape: "cylinder"
+    dim1: 12.0
+  - name: "upper_arm_f"
+    point_a: "uf"
+    point_b: "ubj"
+    shape: "cylinder"
+    dim1: 12.0
+  - name: "upper_arm_r"
+    point_a: "ur"
+    point_b: "ubj"
+    shape: "cylinder"
+    dim1: 12.0
+
+# COLLISION GROUPS (optional): zones within the SAME group are ALLOWED to overlap
+# (their collision is ignored, as if they don't exist to each other). Every other
+# pair -- zones in different groups, or an ungrouped zone vs anything -- IS checked,
+# and a collision there raises the cost. Also controls visualizer coloring: zones
+# sharing a group share a color; ungrouped zones each get their own.
+# Each group may hold up to 10 zones.
+COLLISION_GROUPS:
+  group1:
+    - "tierod"
+  group2:
+    - "upper_arm_f"
+    - "upper_arm_r"

@@ -110,7 +110,7 @@ def handle_optimization(args):
     for name in obj_names:
         try:
             obj_cls = getattr(opt_objs, name)
-            objectives.append(obj_cls())
+            objectives.append(obj_cls(config=config))
         except AttributeError:
             print(f"FATAL ERROR: Objective class '{name}' not found.")
             return

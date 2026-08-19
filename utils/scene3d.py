@@ -131,7 +131,7 @@ def _build_corner_objects(scene, step, hp,
             o[k] = scene.sphere(radius=0.010).material("#222222").move(*_v(pt))
         if show_guides:
             o["tie_ib_guide"] = _make_dashed_line(scene, tr_ib, [0, 1, 0], 250.0, c_tie)
-        o["wheel"] = _make_wheel(scene, step["wc"], step.get("wheel_axis", ax_default), hp.wr, hp.ww)
+        # o["wheel"] = _make_wheel(scene, step["wc"], step.get("wheel_axis", ax_default), hp.wr, hp.ww)
         o["sp_wc"] = scene.sphere(radius=0.014).material("#4466bb").move(*_v(step["wc"]))
 
     elif isinstance(hp, SemiTrailingLink):
@@ -164,7 +164,7 @@ def _build_corner_objects(scene, step, hp,
         for k, pt in [("sp_ucl_ob", step["ucl_ob"]), ("sp_lcl_ob", step["lcl_ob"]),
                       ("sp_s_ob", step["s_ob"])]:
             o[k] = scene.sphere(radius=0.010).material("#222222").move(*_v(pt))
-        o["wheel"] = _make_wheel(scene, step["wc"], step.get("wheel_axis", ax_default), hp.wr, hp.ww)
+        # o["wheel"] = _make_wheel(scene, step["wc"], step.get("wheel_axis", ax_default), hp.wr, hp.ww)
         o["sp_wc"] = scene.sphere(radius=0.014).material("#4466bb").move(*_v(step["wc"]))
 
     return o
@@ -398,6 +398,157 @@ def _fit_camera_dyn(scene, step, vehicle) -> None:
         look_at_z=float(ctr[2]),
         up_x=0, up_y=0, up_z=1,
     )
+
+# --- Optimizer config preview: free-point search boxes + keepout zones -----
+_ZONE_PALETTE = ["#cc2828", "#2864cc", "#cc8a28", "#8a28cc", "#28ccaa", "#cc2891"]
+_FREE_POINT_COLOR = "#FFEE00"
+_PREVIEW_OPACITY = 0.50
+
+_STATIC_ATTRS = ["ubj", "lbj", "uf", "ur", "lf", "lr", "tr_ib", "tr_ob",
+                  "s_ib", "s_ob", "piv_ib", "piv_ob", "wc",
+                  "tl_f", "ucl_ib", "ucl_ob", "lcl_ib", "lcl_ob"]
+
+def _hp_to_static_step(hp) -> dict:
+    """Build a step-like dict from a hardpoints object's rest-position attributes."""
+    return {attr: getattr(hp, attr) for attr in _STATIC_ATTRS if hasattr(hp, attr)}
+
+def _place_shape(obj, p1s: np.ndarray, p2s: np.ndarray):
+    """Move + rotate any Object3D (box or cylinder) to span p1->p2 (scene units)."""
+    _place_cyl(obj, p1s, p2s)
+
+def _make_free_point_box(scene, center_xyz, deltas: dict, color=_FREE_POINT_COLOR,
+                          opacity=_PREVIEW_OPACITY):
+    """Axis-aligned translucent box spanning a free point's per-axis [min,max] deltas.
+    `deltas` is like {'x': [lo, hi], 'y': [...], 'z': [...]} (mm, relative to center)."""
+    center = np.asarray(center_xyz, float)
+    dims = []
+    offset = np.zeros(3)
+    for i, ax in enumerate("xyz"):
+        lo, hi = deltas.get(ax, [0.0, 0.0])
+        span = max(float(hi) - float(lo), 2.0)  # thin slab if unconstrained
+        dims.append(span * _S)
+        offset[i] = (float(lo) + float(hi)) / 2.0
+    box = scene.box(dims[0], dims[1], dims[2]).material(color, opacity=opacity, side="both")
+    pos = (center + offset) * _S
+    box.move(float(pos[0]), float(pos[1]), float(pos[2]))
+    return box
+
+def _make_keepout_zone(scene, p1, p2, shape: str, dim1: float, dim2: float | None,
+                        color: str, opacity=_PREVIEW_OPACITY):
+    """Translucent shape extruded along axis p1->p2. shape='cylinder' (dim1=radius)
+    or 'box' (dim1, dim2 = cross-section side lengths)."""
+    p1s = np.asarray(p1, float) * _S
+    p2s = np.asarray(p2, float) * _S
+    L = max(float(np.linalg.norm(p2s - p1s)), 1e-9)
+    if shape == "box":
+        obj = scene.box(float(dim1) * _S, L, float(dim2 or dim1) * _S)
+    else:
+        r = float(dim1) * _S
+        obj = scene.cylinder(top_radius=r, bottom_radius=r, height=L)
+    obj.material(color, opacity=opacity, side="both")
+    _place_shape(obj, p1s, p2s)
+    return obj
+
+def zone_color(index: int) -> str:
+    return _ZONE_PALETTE[index % len(_ZONE_PALETTE)]
+
+def build_zone_colors(keepout_cfg: list, groups_cfg: dict | None) -> dict[str, str]:
+    """Assign each zone a color. Zones sharing a COLLISION_GROUPS group get the
+    same color; ungrouped zones (or when groups_cfg is unset) each get their own."""
+    zone_to_group: dict[str, str] = {}
+    if groups_cfg:
+        for group_name, members in groups_cfg.items():
+            for member in members or []:
+                zone_to_group[member] = group_name
+
+    color_for_key: dict = {}
+    colors: dict[str, str] = {}
+    for zone in keepout_cfg or []:
+        name = zone.get("name", "")
+        key = zone_to_group.get(name, ("__zone__", name))
+        if key not in color_for_key:
+            color_for_key[key] = zone_color(len(color_for_key))
+        colors[name] = color_for_key[key]
+    return colors
+
+def build_legend_entries(keepout_cfg: list, groups_cfg: dict | None) -> list[tuple[str, str]]:
+    """One (label, color) entry per group, plus one per ungrouped zone."""
+    zone_to_group: dict[str, str] = {}
+    if groups_cfg:
+        for group_name, members in groups_cfg.items():
+            for member in members or []:
+                zone_to_group[member] = group_name
+
+    colors = build_zone_colors(keepout_cfg, groups_cfg)
+    entries: list[tuple[str, str]] = []
+    seen_groups: set = set()
+    for zone in keepout_cfg or []:
+        name = zone.get("name", "")
+        group = zone_to_group.get(name)
+        if group is not None:
+            if group in seen_groups:
+                continue
+            seen_groups.add(group)
+            entries.append((group, colors[name]))
+        else:
+            entries.append((name, colors[name]))
+    return entries
+
+def _resolve_point_attr(hp, name: str) -> str | None:
+    """Resolve a config-supplied point name to the hardpoints object's short
+    attribute name. Accepts either the short attr (e.g. 'tr_ib') or the long
+    YAML key (e.g. 'tie_rod_inboard') via the hardpoints class's _YAML_MAP."""
+    if hasattr(hp, name):
+        return name
+    yaml_map = getattr(hp, "_YAML_MAP", {}) or {}
+    for attr, yaml_key in yaml_map.items():
+        if yaml_key == name:
+            return attr
+    return None
+
+def _resolve_zone_point(name: str, hp) -> np.ndarray:
+    attr = _resolve_point_attr(hp, name)
+    if attr is None:
+        raise ValueError(f"KEEPOUT_ZONES point '{name}' not found on hardpoints")
+    return np.asarray(getattr(hp, attr), float)
+
+def _build_config_preview_scene(scene, hp, free_points_cfg: dict, keepout_cfg: list,
+                                 groups_cfg: dict | None = None) -> dict:
+    """Build a static preview: the vehicle at rest, free-point search boxes (grey),
+    and keepout zone shapes (colored by COLLISION_GROUPS membership, if set)."""
+    objs: dict = {}
+    zone_colors = build_zone_colors(keepout_cfg, groups_cfg)
+    with scene:
+        step = _hp_to_static_step(hp)
+        objs["corner"] = _build_corner_objects(scene, step, hp, show_guides=False)
+
+        free_boxes = {}
+        for pt_name, deltas in (free_points_cfg or {}).items():
+            attr = _resolve_point_attr(hp, pt_name)
+            if attr is None:
+                print(f"WARNING: FREE_POINTS point '{pt_name}' not found on hardpoints. Skipping preview box.")
+                continue
+            center = getattr(hp, attr)
+            free_boxes[pt_name] = _make_free_point_box(scene, center, deltas)
+        objs["free_boxes"] = free_boxes
+
+        zones = {}
+        for i, zone in enumerate(keepout_cfg or []):
+            try:
+                p1 = _resolve_zone_point(zone["point_a"], hp)
+                p2 = _resolve_zone_point(zone["point_b"], hp)
+            except ValueError as e:
+                print(f"WARNING: {e}. Skipping keepout zone '{zone.get('name', i)}'.")
+                continue
+            name = zone.get("name", f"zone_{i}")
+            color = zone_colors.get(name, zone_color(i))
+            zones[name] = (
+                _make_keepout_zone(scene, p1, p2, zone.get("shape", "cylinder"),
+                                    zone.get("dim1", 10.0), zone.get("dim2"), color),
+                color,
+            )
+        objs["zones"] = zones
+    return objs
 
 def _fit_camera(scene, step, sim_type, vehicle, hp):
     """Position camera to frame the geometry."""
