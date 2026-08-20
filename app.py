@@ -10,7 +10,9 @@ import numpy as np
 from nicegui import ui, run
 
 # ours
-from utils.sim_runners import _run_kin, _run_opt, _run_dyn
+from utils.sim_runners import _run_kin, _run_opt, _run_dyn, _load_kin_run, _load_dyn_run, _load_opt_run
+from utils.export import (list_available_runs, build_kin_static_values, build_dyn_static_values,
+                           load_kin_run_data, load_dyn_run_data, NO_COMPARE_SIM_TYPES)
 from utils.scene3d import (_build_scene, _update_scene, _fit_camera,
                             _build_dyn_scene, _update_dyn_scene, _fit_camera_dyn,
                             _build_shock_dyno_scene, _update_shock_dyno_scene, _fit_camera_shock_dyno,
@@ -18,13 +20,12 @@ from utils.scene3d import (_build_scene, _update_scene, _fit_camera,
                             _resolve_point_attr)
 from utils.plot2d import (_build_kin_figures, _build_ackermann_figures, _build_opt_figures,
                            _move_vline, _build_dyn_figures, _build_dyno_figures,
-                           _build_kin_stats, _build_dyn_stats, _build_sweep_space_figures,
-                           rank_solutions)
+                           _build_sweep_space_figures, rank_solutions)
 from models.vehicle import Vehicle
 from utils.misc import add_console_subscriber, remove_console_subscriber
 
 # global constants
-FPS = 60
+FPS = 30
 
 KIN_PATH = "config/kin_config.yml"
 DYN_PATH = "config/dyn_config.yml"
@@ -47,18 +48,22 @@ def main_page():
 
     # sim result cache
     cache = {
-        "steps":      [],
-        "xs":         [],
-        "sim_type":   None,
-        "vehicle":    None,
-        "hp":         None,
+        "steps": [],
+        "xs": [],
+        "sim_type": None,
+        "vehicle": None,
+        "hp": None,
         "named_figs": [],
         "plot_elems": [],
         "scene_objs": None,
+        "mode": None,
+        "last_result": None,
     }
-    scrub    = {"dirty": False, "idx": 0, "playing": False, "last_t": 0.0}
+    scrub = {"dirty": False, "idx": 0, "playing": False, "last_t": 0.0}
     dyn_prog = {"fraction": 0.0, "message": ""}
-    display_items: list = []  # [{"key","label","element","default"}, ...] rebuilt each render
+    run_lookup = {}
+    compare_state = {"active": False, "run_dir": None}
+    display_items: list = []
 
     ui.add_head_html("""<style>
         body,html{margin:0;padding:0;height:100vh;overflow:hidden}
@@ -142,6 +147,11 @@ def main_page():
                 preview_btn.visible = False
                 run_btn  = ui.button("Run" ).props("unelevated dense").classes("bg-emerald-600 text-white text-sm px-3")
 
+            with ui.row().classes("w-full items-center gap-2 px-2 py-2 border-t border-stone-200 bg-stone-50").style("flex-shrink:0"):
+                run_browse_sel = ui.select({}, label="Load Past Run").classes("flex-1").props("dense outlined")
+                refresh_runs_btn = ui.button(icon="refresh").props("outline dense size=sm").classes("text-stone-600")
+                load_run_btn = ui.button("Load", icon="folder_open").props("outline dense size=sm").classes("text-stone-700 border-stone-300")
+
         with ui.column().style("flex:1;height:100vh;display:flex;flex-direction:column;overflow:hidden;background:#f8fafc"):
             # status bar
             with ui.row().classes("items-center gap-3 px-4 pt-2 pb-1").style("flex-shrink:0"):
@@ -153,6 +163,10 @@ def main_page():
                 edit_display_btn = ui.button("Add Graphs", icon="tune", on_click=lambda: edit_display_dialog.open()) \
                     .props("outline dense size=sm").classes("text-stone-700 border-stone-300 text-base")
                 edit_display_btn.visible = False
+                compare_sel = ui.select({}, label="Compare vs").classes("w-56").props("dense outlined")
+                compare_btn = ui.button("Compare", icon="compare_arrows").props("outline dense size=sm").classes("text-stone-700 border-stone-300")
+                compare_clear_btn = ui.button(icon="close").props("flat dense round size=sm").classes("text-stone-500")
+                compare_sel.visible = compare_btn.visible = compare_clear_btn.visible = False
 
             edit_display_dialog = ui.dialog()
             with edit_display_dialog, ui.card().style("width: 380px; max-width: 90vw;"):
@@ -198,6 +212,117 @@ def main_page():
         if tab == "kin":
             hp_button.text = f"Hardpoints: '{get_hp_name()}'"
 
+    def _refresh_run_options():
+        runs = list_available_runs()
+        run_lookup.clear()
+        options = {}
+        for r in runs:
+            run_lookup[r["run_dir"]] = r
+            options[r["run_dir"]] = r["label"]
+        run_browse_sel.options = options
+        if options and run_browse_sel.value not in options:
+            run_browse_sel.value = next(iter(options))
+        run_browse_sel.update()
+
+    def _current_run_dir():
+        lr = cache.get("last_result")
+        if not lr:
+            return None
+        return lr[5] if cache["mode"] == "kin" else lr[2]
+
+    def _refresh_compare_options():
+        mode = cache.get("mode")
+        sim_type = cache.get("sim_type")
+        if mode not in ("kin", "dyn") or sim_type in NO_COMPARE_SIM_TYPES or not cache.get("steps"):
+            compare_sel.visible = compare_btn.visible = compare_clear_btn.visible = False
+            return
+
+        this_run = _current_run_dir()
+        matches = [r for r in list_available_runs()
+                   if r["mode"] == mode and r["sim_type"] == sim_type and r["run_dir"] != this_run]
+        run_lookup.update({r["run_dir"]: r for r in matches})  # keep labels usable even if run_lookup
+                                                                 # hasn't been refreshed since this run was created
+        options = {r["run_dir"]: r["label"] for r in matches}
+        compare_sel.options = options
+        if options and compare_sel.value not in options:
+            compare_sel.value = next(iter(options))
+        compare_sel.update()
+
+        compare_sel.visible = bool(options)
+        compare_btn.visible = bool(options)
+        compare_clear_btn.visible = compare_state["active"]
+
+    def _rerender_current():
+        result = cache.get("last_result")
+        if not result:
+            return
+        _reset_display_items()
+        cache["named_figs"].clear(); cache["plot_elems"].clear()
+        cache["steps"] = []; cache["scene_objs"] = None
+        cache["xs"] = []
+        viz_area.clear()
+        if cache["mode"] == "kin":
+            _render_kin(result)
+        else:
+            _render_dyn(result)
+        _refresh_compare_options()
+
+    def do_compare():
+        run_dir = compare_sel.value
+        if not run_dir:
+            ui.notify("Select a run to compare against first.", type="warning"); return
+        compare_state["active"], compare_state["run_dir"] = True, run_dir
+        try:
+            _rerender_current()
+        except Exception as exc:
+            compare_state["active"], compare_state["run_dir"] = False, None
+            ui.notify(f"Could not load comparison run: {exc}", type="negative", timeout=8000)
+
+    def do_clear_compare():
+        compare_state["active"], compare_state["run_dir"] = False, None
+        _rerender_current()
+
+    def do_load_run():
+        run_dir = run_browse_sel.value
+        meta = run_lookup.get(run_dir)
+        if not meta:
+            ui.notify("Select a run to load first.", type="warning"); return
+
+        run_btn.disable(); save_btn.disable()
+        try:
+            _reset_display_items()
+            cache["named_figs"].clear(); cache["plot_elems"].clear()
+            cache["steps"] = []; cache["scene_objs"] = None
+            cache["xs"] = []
+            compare_state["active"], compare_state["run_dir"] = False, None
+            viz_area.clear()
+
+            if meta["mode"] == "kin":
+                result = _load_kin_run(run_dir)
+                cache["mode"], cache["last_result"] = "kin", result
+                _render_kin(result)
+                _refresh_compare_options()
+            elif meta["mode"] == "dyn":
+                result = _load_dyn_run(run_dir)
+                cache["mode"], cache["last_result"] = "dyn", result
+                _render_dyn(result)
+                _refresh_compare_options()
+            else:  # opt -- persistence/reload only, no comparison support
+                result = _load_opt_run(run_dir)
+                cache["mode"], cache["last_result"] = "opt", result
+                compare_sel.visible = compare_btn.visible = compare_clear_btn.visible = False
+                _render_opt(result)
+
+            status_lbl.text = f"Loaded (not re-run) — {meta['label']}"
+            ui.notify(f"Loaded {meta['label']}", type="positive", position="bottom-right")
+        except Exception as exc:
+            status_lbl.text = f"Error loading run: {exc}"
+            ui.notify(str(exc), type="negative", timeout=10_000)
+            with viz_area:
+                ui.label(traceback.format_exc()).classes("text-red-500 text-xs font-mono whitespace-pre-wrap")
+        finally:
+            run_btn.enable(); save_btn.enable()
+
     async def do_run():
         mode, sim_type = mode_ref["v"], type_ref["v"]
         rtask["task"] = asyncio.current_task()
@@ -212,6 +337,7 @@ def main_page():
         cache["named_figs"].clear(); cache["plot_elems"].clear()
         cache["steps"] = []; cache["scene_objs"] = None
         cache["xs"] = []
+        compare_state["active"], compare_state["run_dir"] = False, None
 
         _start_console()
 
@@ -222,7 +348,9 @@ def main_page():
                 await asyncio.sleep(0)
                 _stop_console()
                 viz_area.clear()
+                cache["mode"], cache["last_result"] = "kin", result
                 _render_kin(result)
+                _refresh_compare_options()
 
             elif mode == "opt":
                 result = await run.io_bound(_run_opt, editors["kin"].value, editors["opt"].value)
@@ -230,6 +358,8 @@ def main_page():
                 await asyncio.sleep(0)
                 _stop_console()
                 viz_area.clear()
+                cache["mode"], cache["last_result"] = "opt", result
+                compare_sel.visible = compare_btn.visible = compare_clear_btn.visible = False
                 _render_opt(result)
 
             elif mode == "dyn":
@@ -242,7 +372,9 @@ def main_page():
                 await asyncio.sleep(0)
                 _stop_console()
                 viz_area.clear()
+                cache["mode"], cache["last_result"] = "dyn", result
                 _render_dyn(result)
+                _refresh_compare_options()
 
             progress.set_value(1.0)
             status_lbl.text = f"Done — {mode} / {sim_type}  ({len(cache['steps'])} steps)"
@@ -467,6 +599,31 @@ def main_page():
         _fit_preview_camera(scene3d, hp)
         status_lbl.text = "Preview ready — configure and press Run to optimize."
 
+    def _parse_num(value_str):
+        try:
+            return float(value_str)
+        except (TypeError, ValueError):
+            return None
+
+    def _render_stat_compare_table(current_pairs, cmp_pairs, cmp_label):
+        cmp_map = dict(cmp_pairs)
+        rows = []
+        for label, cur_val in current_pairs:
+            cmp_val = cmp_map.get(label, "—")
+            cur_num, cmp_num = _parse_num(cur_val), _parse_num(cmp_val)
+            delta = f"{cur_num - cmp_num:+.3f}" if cur_num is not None and cmp_num is not None else "—"
+            rows.append({"metric": label, "current": cur_val, "compare": cmp_val, "delta": delta})
+        ui.label("Static Values — Current vs Compare").classes("font-bold text-sm text-stone-700 mt-1")
+        ui.table(
+            columns=[
+                {"name": "metric", "label": "Metric", "field": "metric", "align": "left"},
+                {"name": "current", "label": "Current", "field": "current", "align": "right"},
+                {"name": "compare", "label": cmp_label, "field": "compare", "align": "right"},
+                {"name": "delta", "label": "Δ", "field": "delta", "align": "right"},
+            ],
+            rows=rows,
+        ).classes("text-xs w-full mb-2").props("dense flat")
+
     def _render_kin(result):
         sim_type, steps, vehicle, cfg, corner_id, run_dir = result
 
@@ -475,6 +632,7 @@ def main_page():
                 ui.label("No valid solution steps returned.").classes("text-red-500 text-sm"); return
 
             _reset_display_items()
+            cache.update(steps=steps, sim_type=sim_type, vehicle=vehicle, hp=None)
 
             if sim_type == "extreme":
                 _render_extreme(steps, run_dir, cfg); return
@@ -484,27 +642,43 @@ def main_page():
 
             cache.update(steps=steps, sim_type=sim_type, vehicle=vehicle, hp=hp)
 
-            stat_pairs = []  # (label, value_str)
-            if sim_type == "ackermann":
-                named_figs, xs = _build_ackermann_figures(steps)
-            else:
-                half_label = "Rear" if corner_id[1] == 1 else "Front"
-                named_figs, xs = _build_kin_figures(steps, half_label=half_label, wr=hp.wr, sim_type=sim_type)
+            cmp_steps = cmp_hp = cmp_label = None
+            if compare_state["active"] and compare_state["run_dir"] and sim_type not in NO_COMPARE_SIM_TYPES:
+                try:
+                    cmp_payload = load_kin_run_data(compare_state["run_dir"])
+                    if cmp_payload["sim_type"] == sim_type:
+                        cmp_steps = cmp_payload["steps"]
+                        cmp_corner_id = cmp_payload.get("corner_id") or corner_id
+                        cmp_hp_name = cmp_payload.get("hardpoints_name")
+                        cmp_hp_path = os.path.join(compare_state["run_dir"], f"{cmp_hp_name}.yml")
+                        if not os.path.exists(cmp_hp_path):
+                            cmp_hp_path = f"config/hardpoints/{cmp_hp_name}.yml"
+                        cmp_vehicle = Vehicle(yaml.safe_load(open(cmp_hp_path)))
+                        cmp_hp = cmp_vehicle.get_corner_from_id(cmp_corner_id).hardpoints
+                        cmp_label = run_lookup.get(compare_state["run_dir"], {}).get(
+                            "timestamp", compare_state["run_dir"])
+                except Exception as exc:
+                    ui.notify(f"Comparison run failed to load: {exc}", type="negative")
 
-                axle_steps = [s["axle_data"] for s in steps if s.get("axle_data")]
-                if axle_steps:
-                    min_plunge = min(a["plunge_mm"] for a in axle_steps)
-                    max_plunge = max(a["plunge_mm"] for a in axle_steps)
-                    abs_angle  = max(max(a["angle_ib_deg"], a["angle_ob_deg"]) for a in axle_steps)
-                    stat_pairs.append((f"{half_label} Plunge Range [mm]", f"{min_plunge:.2f} to {max_plunge:.2f}"))
-                    stat_pairs.append((f"{half_label} Max Joint Angle [deg]", f"{abs_angle:.2f}"))
-                stat_pairs.extend(_build_kin_stats(steps, wr=hp.wr))
+            if cmp_steps:
+                ui.label(f"Comparing against: {cmp_label}").classes("text-xs text-purple-700 bg-purple-50 px-2 py-1 rounded w-fit")
+
+            half_label = "Rear" if corner_id[1] == 1 else "Front"
+            if sim_type == "ackermann":
+                named_figs, xs = _build_ackermann_figures(steps, cmp_steps=cmp_steps, cmp_label=cmp_label or "Compare")
+            else:
+                named_figs, xs = _build_kin_figures(steps, half_label=half_label, wr=hp.wr, sim_type=sim_type,
+                                                     cmp_steps=cmp_steps, cmp_wr=(cmp_hp.wr if cmp_hp else 0.0),
+                                                     cmp_label=cmp_label or "Compare")
+            stat_pairs = build_kin_static_values(steps, sim_type, hp, half_label)
 
             cache["xs"] = xs
             cache["named_figs"] = named_figs
 
-            # static value cards
-            if stat_pairs:
+            if cmp_steps:
+                cmp_stat_pairs = build_kin_static_values(cmp_steps, sim_type, cmp_hp, half_label)
+                _render_stat_compare_table(stat_pairs, cmp_stat_pairs, cmp_label or "Compare")
+            elif stat_pairs:
                 with ui.row().classes("w-full gap-2 flex-wrap"):
                     for label, value in stat_pairs:
                         with ui.card().classes("px-4 py-2") as stat_card:
@@ -606,6 +780,25 @@ def main_page():
                     ui.icon("folder", color="teal")
                     ui.label(f"Dyno Results Exported to: {out_file}").classes("text-sm text-stone-700 font-mono")
 
+            cmp_steps = cmp_vehicle = cmp_label = None
+            if compare_state["active"] and compare_state["run_dir"] and sim_type not in NO_COMPARE_SIM_TYPES:
+                try:
+                    cmp_payload = load_dyn_run_data(compare_state["run_dir"])
+                    if cmp_payload["sim_type"] == sim_type:
+                        cmp_steps = cmp_payload["steps"]
+                        cmp_hp_name = cmp_payload.get("hardpoints_name")
+                        cmp_hp_path = os.path.join(compare_state["run_dir"], f"{cmp_hp_name}.yml")
+                        if not os.path.exists(cmp_hp_path):
+                            cmp_hp_path = f"config/hardpoints/{cmp_hp_name}.yml"
+                        cmp_vehicle = Vehicle(yaml.safe_load(open(cmp_hp_path)))
+                        cmp_label = run_lookup.get(compare_state["run_dir"], {}).get(
+                            "timestamp", compare_state["run_dir"])
+                except Exception as exc:
+                    ui.notify(f"Comparison run failed to load: {exc}", type="negative")
+
+            if cmp_steps:
+                ui.label(f"Comparing against: {cmp_label}").classes("text-xs text-purple-700 bg-purple-50 px-2 py-1 rounded w-fit")
+
             if sim_type != "shock_dyno":
                 corner_wr = {
                     "fl": vehicle.front_left.hardpoints.wr,
@@ -613,8 +806,13 @@ def main_page():
                     "rl": vehicle.rear_left.hardpoints.wr,
                     "rr": vehicle.rear_right.hardpoints.wr,
                 }
-                stat_pairs = _build_dyn_stats(steps, corner_wr=corner_wr)
-                if stat_pairs:
+                # Built via build_dyn_static_values() (a thin wrapper around _build_dyn_stats)
+                # so the current/compare sides always use the exact same label text.
+                stat_pairs = build_dyn_static_values(steps, sim_type, vehicle)
+                if cmp_steps:
+                    cmp_stat_pairs = build_dyn_static_values(cmp_steps, sim_type, cmp_vehicle)
+                    _render_stat_compare_table(stat_pairs, cmp_stat_pairs, cmp_label or "Compare")
+                elif stat_pairs:
                     with ui.row().classes("w-full gap-2 flex-wrap"):
                         for label, value in stat_pairs:
                             with ui.card().classes("px-4 py-2") as stat_card:
@@ -648,9 +846,9 @@ def main_page():
             cache["scene_objs"] = scene_objs
 
             if sim_type == "shock_dyno":
-                named_figs, xs = _build_dyno_figures(steps)
+                named_figs, xs = _build_dyno_figures(steps, cmp_steps=cmp_steps, cmp_label=cmp_label or "Compare")
             else:
-                named_figs, xs = _build_dyn_figures(steps)
+                named_figs, xs = _build_dyn_figures(steps, cmp_steps=cmp_steps, cmp_label=cmp_label or "Compare")
                 
             cache["xs"] = xs
             cache["named_figs"] = named_figs
@@ -765,6 +963,10 @@ def main_page():
     preview_btn.on_click(do_preview)
     run_btn.on_click(do_run)
     play_btn.on_click(do_play_pause)
+    refresh_runs_btn.on_click(lambda: _refresh_run_options())
+    load_run_btn.on_click(do_load_run)
+    compare_btn.on_click(do_compare)
+    compare_clear_btn.on_click(do_clear_compare)
 
     # initialize button text
     try:
@@ -773,5 +975,7 @@ def main_page():
             hp_button.text = f"EDIT HARDPOINTS"
     except Exception:
         pass
+
+    _refresh_run_options()
 
 ui.run(title="SAGE", port=8080, reload=False, show=True, favicon="🌿")

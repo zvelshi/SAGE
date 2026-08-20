@@ -24,6 +24,8 @@ _COLORS = ["#059669", "#65a30d", "#14b8a6", "#047857", "#10b981", "#84cc16"]
 _C_FRONT = "#059669"
 _C_REAR = "#65a30d"
 _C_TIE = "#14b8a6"
+_C_CMP = "#9333ea"
+_C_CMP2 = "#c026d3"
 
 def _vline_shape(x: float) -> dict[str, Any]:
     """Return a vertical line shape for plotly."""
@@ -31,11 +33,12 @@ def _vline_shape(x: float) -> dict[str, Any]:
                 xref="x", yref="paper",
                 line=dict(color="rgba(16,185,129,0.8)", width=1.5, dash="dot"))
 
-def _build_dyno_figures(steps: list) -> tuple[list[tuple[str, Any]], list[float]]:
-    """Build figures for a Shock Dyno test."""
+def _build_dyno_figures(steps: list, cmp_steps: list | None = None,
+                         cmp_label: str = "Compare") -> tuple[list[tuple[str, Any]], list[float]]:
+    """Build figures for a Shock Dyno test. cmp_steps: optional second test overlaid dashed."""
     if not steps:
         return [], []
-        
+
     t = [s["t"] for s in steps]
     vel = [s["velocity"] for s in steps]
     disp = [s["displacement"] for s in steps]
@@ -43,12 +46,26 @@ def _build_dyno_figures(steps: list) -> tuple[list[tuple[str, Any]], list[float]
     force_spr = [s["force_spring"] for s in steps]
     force_damp = [s["force_damper"] for s in steps]
 
+    c_t = c_vel = c_disp = c_force_tot = c_force_spr = c_force_damp = None
+    if cmp_steps:
+        c_t = [s["t"] for s in cmp_steps]
+        c_vel = [s["velocity"] for s in cmp_steps]
+        c_disp = [s["displacement"] for s in cmp_steps]
+        c_force_tot = [s["force_total"] for s in cmp_steps]
+        c_force_spr = [s["force_spring"] for s in cmp_steps]
+        c_force_damp = [s["force_damper"] for s in cmp_steps]
+
     named_figs = []
 
     # Force vs Velocity (The classic dyno plot)
     fig_fv = make_subplots(rows=1, cols=1)
     fig_fv.add_trace(go.Scatter(x=vel, y=force_damp, mode="lines", name="Damping Force", line=dict(color=_C_FRONT, width=2)))
     fig_fv.add_trace(go.Scatter(x=vel, y=force_tot, mode="lines", name="Total Force", line=dict(color=_C_REAR, width=2, dash="dash")))
+    if cmp_steps:
+        fig_fv.add_trace(go.Scatter(x=c_vel, y=c_force_damp, mode="lines", name=f"{cmp_label} Damping",
+                                     line=dict(color=_C_CMP, width=2)))
+        fig_fv.add_trace(go.Scatter(x=c_vel, y=c_force_tot, mode="lines", name=f"{cmp_label} Total",
+                                     line=dict(color=_C_CMP2, width=2, dash="dash")))
     fig_fv.update_layout(
         title="Force vs Velocity",
         xaxis_title="Velocity [mm/s] (+ Compression, - Rebound)",
@@ -65,14 +82,23 @@ def _build_dyno_figures(steps: list) -> tuple[list[tuple[str, Any]], list[float]
 
     # Force vs Absolute Velocity
     fig_fav = make_subplots(rows=1, cols=1)
-    
+
     comp_vel = [abs(v) for v in vel if v >= 0]
     comp_f = [f for v, f in zip(vel, force_damp) if v >= 0]
     reb_vel = [abs(v) for v in vel if v < 0]
     reb_f = [f for v, f in zip(vel, force_damp) if v < 0]
-    
+
     fig_fav.add_trace(go.Scatter(x=comp_vel, y=comp_f, mode="lines", name="Compression", line=dict(color=_C_FRONT, width=2)))
     fig_fav.add_trace(go.Scatter(x=reb_vel, y=reb_f, mode="lines", name="Rebound", line=dict(color=_C_REAR, width=2)))
+    if cmp_steps:
+        c_comp_vel = [abs(v) for v in c_vel if v >= 0]
+        c_comp_f   = [f for v, f in zip(c_vel, c_force_damp) if v >= 0]
+        c_reb_vel  = [abs(v) for v in c_vel if v < 0]
+        c_reb_f    = [f for v, f in zip(c_vel, c_force_damp) if v < 0]
+        fig_fav.add_trace(go.Scatter(x=c_comp_vel, y=c_comp_f, mode="lines", name=f"{cmp_label} Compression",
+                                      line=dict(color=_C_CMP, width=2)))
+        fig_fav.add_trace(go.Scatter(x=c_reb_vel, y=c_reb_f, mode="lines", name=f"{cmp_label} Rebound",
+                                      line=dict(color=_C_CMP2, width=2)))
     fig_fav.update_layout(
         title="Force vs Absolute Velocity",
         xaxis_title="Absolute Velocity [mm/s]",
@@ -91,6 +117,11 @@ def _build_dyno_figures(steps: list) -> tuple[list[tuple[str, Any]], list[float]
     fig_fx = make_subplots(rows=1, cols=1)
     fig_fx.add_trace(go.Scatter(x=disp, y=force_spr, mode="lines", name="Spring Force", line=dict(color=_C_FRONT, width=2)))
     fig_fx.add_trace(go.Scatter(x=disp, y=force_tot, mode="lines", name="Total Force", line=dict(color=_C_REAR, width=2, dash="dash")))
+    if cmp_steps:
+        fig_fx.add_trace(go.Scatter(x=c_disp, y=c_force_spr, mode="lines", name=f"{cmp_label} Spring",
+                                     line=dict(color=_C_CMP, width=2)))
+        fig_fx.add_trace(go.Scatter(x=c_disp, y=c_force_tot, mode="lines", name=f"{cmp_label} Total",
+                                     line=dict(color=_C_CMP2, width=2, dash="dash")))
     fig_fx.update_layout(
         title="Force vs Displacement",
         xaxis_title="Displacement [mm] (+ Compression, - Rebound)",
@@ -108,17 +139,24 @@ def _build_dyno_figures(steps: list) -> tuple[list[tuple[str, Any]], list[float]
     fig_t.add_trace(go.Scatter(x=t, y=disp, mode="lines", name="Displacement", line=dict(color=_C_FRONT)), row=1, col=1)
     fig_t.add_trace(go.Scatter(x=t, y=vel, mode="lines", name="Velocity", line=dict(color=_C_REAR)), row=2, col=1)
     fig_t.add_trace(go.Scatter(x=t, y=force_tot, mode="lines", name="Total Force", line=dict(color=_C_TIE)), row=3, col=1)
-    
+    if cmp_steps:
+        fig_t.add_trace(go.Scatter(x=c_t, y=c_disp, mode="lines", name=f"{cmp_label} Displacement",
+                                    line=dict(color=_C_CMP, dash="dash")), row=1, col=1)
+        fig_t.add_trace(go.Scatter(x=c_t, y=c_vel, mode="lines", name=f"{cmp_label} Velocity",
+                                    line=dict(color=_C_CMP, dash="dash")), row=2, col=1)
+        fig_t.add_trace(go.Scatter(x=c_t, y=c_force_tot, mode="lines", name=f"{cmp_label} Total Force",
+                                    line=dict(color=_C_CMP, dash="dash")), row=3, col=1)
+
     fig_t.update_yaxes(title_text="Disp [mm]", row=1, col=1)
     fig_t.update_yaxes(title_text="Vel [mm/s]", row=2, col=1)
     fig_t.update_yaxes(title_text="Force [N]", row=3, col=1)
-    
+
     fig_t.update_layout(
         title="Time Series",
         xaxis_title="Time [s]",
         height=600,
         margin=dict(l=40, r=20, t=40, b=40),
-        showlegend=False,
+        showlegend=bool(cmp_steps),
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(240,240,240,0.5)'
     )
@@ -126,7 +164,19 @@ def _build_dyno_figures(steps: list) -> tuple[list[tuple[str, Any]], list[float]
 
     return named_figs, t
 
-def _build_kin_figures(steps, half_label="Front", wr=0.0, sim_type=None):
+def _kin_x_series(steps):
+    if "x_val" in steps[0]:
+        return [s["x_val"] for s in steps], steps[0].get("x_label", "Input")
+    if "travel_mm" in steps[0]:
+        return [s["travel_mm"] for s in steps], "Shock Travel [mm]"
+    if "steer_mm" in steps[0]:
+        return [s["steer_mm"] for s in steps], "Rack Travel [mm]"
+    return list(range(len(steps))), "Step"
+
+def _build_kin_figures(steps, half_label="Front", wr=0.0, sim_type=None,
+                        cmp_steps=None, cmp_wr=0.0, cmp_label="Compare"):
+    """cmp_steps: optional second dataset (e.g. a previous run) overlaid as a dashed trace
+    on every applicable figure, for the Web UI's run-comparison feature."""
     atts = [get_wheel_attitude(s) for s in steps]
     plunge, a_ib, a_ob = [], [], []
     for s in steps:
@@ -135,53 +185,69 @@ def _build_kin_figures(steps, half_label="Front", wr=0.0, sim_type=None):
         a_ib.append(d.get("angle_ib_deg", 0))
         a_ob.append(d.get("angle_ob_deg", 0))
 
-    if "x_val" in steps[0]:
-        xs, xl = [s["x_val"] for s in steps], steps[0].get("x_label", "Input")
-    elif "travel_mm" in steps[0]:
-        xs, xl = [s["travel_mm"] for s in steps], "Shock Travel [mm]"
-    elif "steer_mm" in steps[0]:
-        xs, xl = [s["steer_mm"] for s in steps], "Rack Travel [mm]"
-    else:
-        xs, xl = list(range(len(steps))), "Step"
-
+    xs, xl = _kin_x_series(steps)
     x0 = xs[0]
+    motion_ratio = motion_ratio_series(steps, wr=wr)
 
-    def mfig(title, traces, show_legend=False):
+    c_atts = c_plunge = c_a_ib = c_a_ob = c_mr = None
+    c_xs = None
+    if cmp_steps:
+        c_atts = [get_wheel_attitude(s) for s in cmp_steps]
+        c_plunge, c_a_ib, c_a_ob = [], [], []
+        for s in cmp_steps:
+            d = s.get("axle_data", {})
+            c_plunge.append(d.get("plunge_mm", 0))
+            c_a_ib.append(d.get("angle_ib_deg", 0))
+            c_a_ob.append(d.get("angle_ob_deg", 0))
+        c_xs, _ = _kin_x_series(cmp_steps)
+        c_mr = motion_ratio_series(cmp_steps, wr=cmp_wr)
+
+    def mfig(title, primary_name, y, extra_traces=None):
+        traces = [go.Scatter(x=xs, y=y, mode="lines",
+                              name=primary_name if cmp_steps else None,
+                              line=dict(color=_COLORS[0], width=2))]
+        if extra_traces:
+            traces.extend(extra_traces)
         f = go.Figure(data=traces)
         f.update_layout(**_LAYOUT_BASE,
                         title=dict(text=title, font=dict(size=11)),
                         xaxis_title=xl,
-                        showlegend=show_legend,
+                        showlegend=bool(cmp_steps) or (extra_traces is not None),
                         shapes=[_vline_shape(x0)])
         return f
 
-    motion_ratio = motion_ratio_series(steps, wr=wr)
+    def cmp_trace(y, name=None, color=_C_CMP, dash="dash"):
+        return go.Scatter(x=c_xs, y=y, mode="lines", name=name or cmp_label,
+                           line=dict(color=color, width=2, dash=dash))
 
     figs = [
-        ("camber", mfig("Camber [°]",
-            [go.Scatter(x=xs, y=[a["camber"] for a in atts],
-                        mode="lines", line=dict(color=_COLORS[0], width=2))])),
-        ("caster", mfig("Caster [°]",
-            [go.Scatter(x=xs, y=[a["caster"] for a in atts],
-                        mode="lines", line=dict(color=_COLORS[1], width=2))])),
-        ("toe",    mfig("Toe [°]",
-            [go.Scatter(x=xs, y=[a["toe"] for a in atts],
-                        mode="lines", line=dict(color=_COLORS[2], width=2))])),
-        ("motion_ratio", mfig(f"Motion Ratio — {half_label} [-]",
-                    [go.Scatter(x=xs, y=motion_ratio.tolist(),
-                                mode="lines", line=dict(color=_COLORS[5], width=2))])),
+        ("camber", mfig("Camber [°]", half_label, [a["camber"] for a in atts],
+            [cmp_trace([a["camber"] for a in c_atts])] if cmp_steps else None)),
+        ("caster", mfig("Caster [°]", half_label, [a["caster"] for a in atts],
+            [cmp_trace([a["caster"] for a in c_atts])] if cmp_steps else None)),
+        ("toe",    mfig("Toe [°]", half_label, [a["toe"] for a in atts],
+            [cmp_trace([a["toe"] for a in c_atts])] if cmp_steps else None)),
+        ("motion_ratio", mfig(f"Motion Ratio — {half_label} [-]", half_label, motion_ratio.tolist(),
+            [cmp_trace(c_mr.tolist())] if cmp_steps else None)),
     ]
 
     if sim_type != "sweep_space":
-        figs.append(("plunge", mfig("Axle Plunge [mm]",
-            [go.Scatter(x=xs, y=plunge,
-                        mode="lines", line=dict(color=_COLORS[3], width=2))])))
-        figs.append(("cv",     mfig("CV Angles [°]", [
+        figs.append(("plunge", mfig("Axle Plunge [mm]", half_label, plunge,
+            [cmp_trace(c_plunge)] if cmp_steps else None)))
+
+        cv_traces = [
             go.Scatter(x=xs, y=a_ib, mode="lines", name="Inboard",
                        line=dict(color=_COLORS[4], width=2)),
             go.Scatter(x=xs, y=a_ob, mode="lines", name="Outboard",
                        line=dict(color=_COLORS[4], width=2, dash="dash")),
-        ], show_legend=True)))
+        ]
+        if cmp_steps:
+            cv_traces.append(cmp_trace(c_a_ib, name=f"{cmp_label} Inboard", color=_C_CMP))
+            cv_traces.append(cmp_trace(c_a_ob, name=f"{cmp_label} Outboard", color=_C_CMP2))
+        cv_fig = go.Figure(data=cv_traces)
+        cv_fig.update_layout(**_LAYOUT_BASE, title=dict(text="CV Angles [°]", font=dict(size=11)),
+                              xaxis_title=xl, showlegend=True, shapes=[_vline_shape(x0)])
+        figs.append(("cv", cv_fig))
 
     return figs, xs
 
@@ -265,16 +331,23 @@ def _build_dyn_stats(steps, corner_wr=None):
         stats.append((f"{label} Toe (After Settle) [°]", f"{att['toe']:.2f}"))
     return stats
 
-def _build_ackermann_figures(steps):
+def _build_ackermann_figures(steps, cmp_steps=None, cmp_label="Compare"):
     xs = [s["input"] for s in steps]
     ys = [s["ackermann_pct"] for s in steps]
-    f  = go.Figure(data=[go.Scatter(x=xs, y=ys, mode="lines",
-                                     line=dict(color=_COLORS[4], width=2))])
+    traces = [go.Scatter(x=xs, y=ys, mode="lines", name="Current" if cmp_steps else None,
+                          line=dict(color=_COLORS[4], width=2))]
+    if cmp_steps:
+        c_xs = [s["input"] for s in cmp_steps]
+        c_ys = [s["ackermann_pct"] for s in cmp_steps]
+        traces.append(go.Scatter(x=c_xs, y=c_ys, mode="lines", name=cmp_label,
+                                  line=dict(color=_C_CMP, width=2, dash="dash")))
+    f = go.Figure(data=traces)
     f.add_hline(y=100, line_color="gray", line_dash="dash", opacity=0.4)
     f.update_layout(**{**_LAYOUT_BASE, "height": 280},
                     title="Ackermann %",
                     xaxis_title="Rack Travel [mm]",
                     yaxis_title="%",
+                    showlegend=bool(cmp_steps),
                     shapes=[_vline_shape(xs[0])])
     return [("ackermann_pct", f)], xs
 
@@ -402,8 +475,9 @@ def _move_vline(fig: go.Figure, x_val: float) -> None:
         fig.layout.shapes[0].x0 = x_val
         fig.layout.shapes[0].x1 = x_val
 
-def _build_dyn_figures(steps: list[dict[str, Any]]):
-    """Build figures for a Shock Dyno test."""  
+def _build_dyn_figures(steps: list[dict[str, Any]], cmp_steps: list[dict[str, Any]] | None = None,
+                        cmp_label: str = "Compare"):
+    """Build figures for a Static Drop run. cmp_steps: optional second run overlaid dashed."""
     xs = [s["t"] for s in steps]
     x0 = xs[0] if xs else 0.0
 
@@ -416,6 +490,18 @@ def _build_dyn_figures(steps: list[dict[str, Any]]):
     sl_rl = [s["rl"]["shock_length"] if s["rl"] else None for s in steps]
     sl_rr = [s["rr"]["shock_length"] if s["rr"] else None for s in steps]
 
+    c_xs = c_z_cog = c_roll = c_pitch = None
+    c_sl_fl = c_sl_fr = c_sl_rl = c_sl_rr = None
+    if cmp_steps:
+        c_xs = [s["t"] for s in cmp_steps]
+        c_z_cog = [s["cog_pos"][2] for s in cmp_steps]
+        c_roll  = [np.degrees(s["phi"]) for s in cmp_steps]
+        c_pitch = [np.degrees(s["theta"]) for s in cmp_steps]
+        c_sl_fl = [s["fl"]["shock_length"] if s["fl"] else None for s in cmp_steps]
+        c_sl_fr = [s["fr"]["shock_length"] if s["fr"] else None for s in cmp_steps]
+        c_sl_rl = [s["rl"]["shock_length"] if s["rl"] else None for s in cmp_steps]
+        c_sl_rr = [s["rr"]["shock_length"] if s["rr"] else None for s in cmp_steps]
+
     def mfig(title, traces, show_legend=False):
         f = go.Figure(data=traces)
         f.update_layout(**_LAYOUT_BASE,
@@ -425,31 +511,60 @@ def _build_dyn_figures(steps: list[dict[str, Any]]):
                         shapes=[_vline_shape(x0)])
         return f
 
-    def _attitude(key, field):
+    def _attitude(steps_list, key, field):
         out = []
-        for s in steps:
+        for s in steps_list:
             corner = s.get(key)
             out.append(get_wheel_attitude(corner)[field] if corner else None)
         return out
 
     def _lr_fig(title, field, l_key, r_key, color):
-        return mfig(title, [
-            go.Scatter(x=xs, y=_attitude(l_key, field), mode="lines", name=l_key.upper(),
+        traces = [
+            go.Scatter(x=xs, y=_attitude(steps, l_key, field), mode="lines", name=l_key.upper(),
                        line=dict(color=color, width=1.5)),
-            go.Scatter(x=xs, y=_attitude(r_key, field), mode="lines", name=r_key.upper(),
+            go.Scatter(x=xs, y=_attitude(steps, r_key, field), mode="lines", name=r_key.upper(),
                        line=dict(color=color, width=1.5, dash="dot")),
-        ], show_legend=True)
+        ]
+        if cmp_steps:
+            traces.append(go.Scatter(x=c_xs, y=_attitude(cmp_steps, l_key, field), mode="lines",
+                                      name=f"{cmp_label} {l_key.upper()}",
+                                      line=dict(color=_C_CMP, width=1.5)))
+            traces.append(go.Scatter(x=c_xs, y=_attitude(cmp_steps, r_key, field), mode="lines",
+                                      name=f"{cmp_label} {r_key.upper()}",
+                                      line=dict(color=_C_CMP2, width=1.5, dash="dot")))
+        return mfig(title, traces, show_legend=True)
+
+    cog_z_traces = [go.Scatter(x=xs, y=z_cog, mode="lines", name="Current" if cmp_steps else None,
+                                line=dict(color=_COLORS[0], width=2))]
+    roll_traces  = [go.Scatter(x=xs, y=roll, mode="lines", name="Current" if cmp_steps else None,
+                                line=dict(color=_COLORS[1], width=2))]
+    pitch_traces = [go.Scatter(x=xs, y=pitch, mode="lines", name="Current" if cmp_steps else None,
+                                line=dict(color=_COLORS[2], width=2))]
+    shock_traces = [
+        go.Scatter(x=xs, y=sl_fl, mode="lines", name="FL", line=dict(color=_COLORS[0], width=1.5)),
+        go.Scatter(x=xs, y=sl_fr, mode="lines", name="FR", line=dict(color=_COLORS[1], width=1.5)),
+        go.Scatter(x=xs, y=sl_rl, mode="lines", name="RL", line=dict(color=_COLORS[2], width=1.5, dash="dash")),
+        go.Scatter(x=xs, y=sl_rr, mode="lines", name="RR", line=dict(color=_COLORS[3], width=1.5, dash="dash")),
+    ]
+    if cmp_steps:
+        cog_z_traces.append(go.Scatter(x=c_xs, y=c_z_cog, mode="lines", name=cmp_label,
+                                        line=dict(color=_C_CMP, width=2, dash="dash")))
+        roll_traces.append(go.Scatter(x=c_xs, y=c_roll, mode="lines", name=cmp_label,
+                                       line=dict(color=_C_CMP, width=2, dash="dash")))
+        pitch_traces.append(go.Scatter(x=c_xs, y=c_pitch, mode="lines", name=cmp_label,
+                                        line=dict(color=_C_CMP, width=2, dash="dash")))
+        shock_traces.extend([
+            go.Scatter(x=c_xs, y=c_sl_fl, mode="lines", name=f"{cmp_label} FL", line=dict(color=_C_CMP, width=1.5)),
+            go.Scatter(x=c_xs, y=c_sl_fr, mode="lines", name=f"{cmp_label} FR", line=dict(color=_C_CMP2, width=1.5)),
+            go.Scatter(x=c_xs, y=c_sl_rl, mode="lines", name=f"{cmp_label} RL", line=dict(color=_C_CMP, width=1.5, dash="dash")),
+            go.Scatter(x=c_xs, y=c_sl_rr, mode="lines", name=f"{cmp_label} RR", line=dict(color=_C_CMP2, width=1.5, dash="dash")),
+        ])
 
     return [
-        ("cog_z", mfig("CoG Z [mm]", [go.Scatter(x=xs, y=z_cog, mode="lines", line=dict(color=_COLORS[0], width=2))])),
-        ("cog_roll", mfig("Roll [°]", [go.Scatter(x=xs, y=roll, mode="lines", line=dict(color=_COLORS[1], width=2))])),
-        ("cog_pitch", mfig("Pitch [°]", [go.Scatter(x=xs, y=pitch, mode="lines", line=dict(color=_COLORS[2], width=2))])),
-        ("shock_lengths", mfig("Shock Lengths [mm]", [
-            go.Scatter(x=xs, y=sl_fl, mode="lines", name="FL", line=dict(color=_COLORS[0], width=1.5)),
-            go.Scatter(x=xs, y=sl_fr, mode="lines", name="FR", line=dict(color=_COLORS[1], width=1.5)),
-            go.Scatter(x=xs, y=sl_rl, mode="lines", name="RL", line=dict(color=_COLORS[2], width=1.5, dash="dash")),
-            go.Scatter(x=xs, y=sl_rr, mode="lines", name="RR", line=dict(color=_COLORS[3], width=1.5, dash="dash")),
-        ], show_legend=True)),
+        ("cog_z", mfig("CoG Z [mm]", cog_z_traces, show_legend=bool(cmp_steps))),
+        ("cog_roll", mfig("Roll [°]", roll_traces, show_legend=bool(cmp_steps))),
+        ("cog_pitch", mfig("Pitch [°]", pitch_traces, show_legend=bool(cmp_steps))),
+        ("shock_lengths", mfig("Shock Lengths [mm]", shock_traces, show_legend=True)),
         ("camber_front", _lr_fig("Front Camber [°]", "camber", "fl", "fr", _C_FRONT)),
         ("caster_front", _lr_fig("Front Caster [°]", "caster", "fl", "fr", _C_FRONT)),
         ("toe_front",    _lr_fig("Front Toe [°]",    "toe",    "fl", "fr", _C_FRONT)),
