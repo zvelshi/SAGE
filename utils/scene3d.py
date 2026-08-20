@@ -131,7 +131,7 @@ def _build_corner_objects(scene, step, hp,
             o[k] = scene.sphere(radius=0.010).material("#222222").move(*_v(pt))
         if show_guides:
             o["tie_ib_guide"] = _make_dashed_line(scene, tr_ib, [0, 1, 0], 250.0, c_tie)
-        # o["wheel"] = _make_wheel(scene, step["wc"], step.get("wheel_axis", ax_default), hp.wr, hp.ww)
+        o["wheel"] = _make_wheel(scene, step["wc"], step.get("wheel_axis", ax_default), hp.wr, hp.ww)
         o["sp_wc"] = scene.sphere(radius=0.014).material("#4466bb").move(*_v(step["wc"]))
 
     elif isinstance(hp, SemiTrailingLink):
@@ -164,7 +164,7 @@ def _build_corner_objects(scene, step, hp,
         for k, pt in [("sp_ucl_ob", step["ucl_ob"]), ("sp_lcl_ob", step["lcl_ob"]),
                       ("sp_s_ob", step["s_ob"])]:
             o[k] = scene.sphere(radius=0.010).material("#222222").move(*_v(pt))
-        # o["wheel"] = _make_wheel(scene, step["wc"], step.get("wheel_axis", ax_default), hp.wr, hp.ww)
+        o["wheel"] = _make_wheel(scene, step["wc"], step.get("wheel_axis", ax_default), hp.wr, hp.ww)
         o["sp_wc"] = scene.sphere(radius=0.014).material("#4466bb").move(*_v(step["wc"]))
 
     return o
