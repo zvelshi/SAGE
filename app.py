@@ -54,6 +54,19 @@ SIM_TYPES = {
     "opt": ["run"],
 }
 
+def _step_geometry_complete(s):
+    if "left" in s or "right" in s:
+        return bool(s.get("left")) and bool(s.get("right"))
+    if "fl" in s:
+        return all(s.get(k) for k in ("fl", "fr", "rl", "rr"))
+    return True
+
+def _last_scene_step(steps):
+    for s in reversed(steps):
+        if _step_geometry_complete(s):
+            return s
+    return steps[-1]
+
 @ui.page("/")
 def main_page():
     editors    = {}
@@ -449,12 +462,12 @@ def main_page():
 
         so = cache["scene_objs"]
         if so is not None:
-            if cache["sim_type"] == "static":
+            if cache["sim_type"] == "static" or cache["sim_type"] == "front_steer" or cache["sim_type"] in FULL_VEHICLE_TYPES:
                 _update_dyn_scene(so, steps[idx], cache["vehicle"])
             elif cache["sim_type"] == "shock_dyno":
                 _update_shock_dyno_scene(so, steps[idx])
             else:
-                _update_scene(so, steps[idx], cache["sim_type"], cache["vehicle"], cache["hp"])
+                _update_scene(so, steps[idx], cache["hp"])
 
         await asyncio.sleep(0) # yield so UI events can be processed
 
@@ -721,10 +734,16 @@ def main_page():
                 scene3d = ui.scene(width=900, height=420,background_color="#f0f4f8", grid=(10, 100)).classes("w-full")
             _add_display_item("3D View", card_3d, default_visible=True, category="3d")
 
-            # build objects on last step (widest extent) for camera fit, then update to step 0
-            scene_objs = _build_scene(scene3d, steps[-1], sim_type, vehicle, hp)
-            _fit_camera(scene3d, steps[-1], sim_type, vehicle, hp)
-            _update_scene(scene_objs, steps[0], sim_type, vehicle, hp)
+            # build objects on last valid step (widest extent) for camera fit, then update to step 0
+            scene_step = _last_scene_step(steps)
+            if sim_type == "front_steer" or sim_type in FULL_VEHICLE_TYPES:
+                scene_objs = _build_dyn_scene(scene3d, scene_step, vehicle)
+                _fit_camera_dyn(scene3d, scene_step, vehicle)
+                _update_dyn_scene(scene_objs, steps[0], vehicle)
+            else:
+                scene_objs = _build_scene(scene3d, scene_step, hp)
+                _fit_camera(scene3d, scene_step, hp)
+                _update_scene(scene_objs, steps[0], hp)
             cache["scene_objs"] = scene_objs
 
             # 3D data plots
