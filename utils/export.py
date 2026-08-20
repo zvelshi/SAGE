@@ -11,6 +11,7 @@ import numpy as np
 from utils.geometry import get_wheel_attitude, motion_ratio_series
 from utils.misc import log_to_file
 from utils.plot2d import _build_kin_stats, _build_dyn_stats
+from simulations.scenarios.kin.full_vehicle import FULL_VEHICLE_TYPES
 
 _KIN_DATA_JSON = "kin_data.json"
 _KIN_DATA_CSV  = "kin_data.csv"
@@ -50,11 +51,28 @@ def build_kin_static_values(steps: list, sim_type: str, hp, half_label: str) -> 
     if not steps or sim_type in NO_COMPARE_SIM_TYPES:
         return []
 
-    if sim_type == "ackermann":
+    if sim_type == "front_steer":
+        stats = []
         pct = steps[-1].get("ackermann_pct")
-        if pct is None or (isinstance(pct, float) and math.isnan(pct)):
-            return []
-        return [("Ackermann % (Full Steer)", f"{pct:.2f}")]
+        if pct is not None and not (isinstance(pct, float) and math.isnan(pct)):
+            stats.append(("Ackermann % (Full Steer)", f"{pct:.2f}"))
+        return stats
+
+    if sim_type in FULL_VEHICLE_TYPES:
+        stats = []
+        def _range(key, label, fmt="{:.2f}"):
+            vals = [s.get(key) for s in steps if s.get(key) is not None
+                    and not (isinstance(s.get(key), float) and math.isnan(s[key]))]
+            if vals:
+                stats.append((label, f"{fmt.format(min(vals))} to {fmt.format(max(vals))}"))
+        _range("wheelbase_change_mm", "Wheelbase Change Range [mm]")
+        _range("front_track_change_mm", "Front Track Change Range [mm]")
+        _range("rear_track_change_mm", "Rear Track Change Range [mm]")
+        _range("pitch_angle_deg", "Pitch Angle Range [deg]")
+        _range("front_roll_angle_deg", "Front Roll Angle Range [deg]")
+        _range("rear_roll_angle_deg", "Rear Roll Angle Range [deg]")
+        _range("front_roll_center_z_mm", "Front Roll Center Height Range [mm]")
+        return stats
 
     stats = []
     axle_steps = [s["axle_data"] for s in steps if s.get("axle_data")]
@@ -73,11 +91,41 @@ def build_kin_series(steps: list, sim_type: str, wr: float = 0.0) -> dict:
     if not steps:
         return {}
 
-    if sim_type == "ackermann":
+    if sim_type == "front_steer":
         return {
             "rack_travel_mm": [s["input"] for s in steps],
             "ackermann_pct":  [s["ackermann_pct"] for s in steps],
+            "toe_l_deg":      [s["toe_l_deg"] for s in steps],
+            "toe_r_deg":      [s["toe_r_deg"] for s in steps],
+            "track_change_mm": [s["track_change_mm"] for s in steps],
+            "trail_l_mm":     [s["trail_l_mm"] for s in steps],
+            "trail_r_mm":     [s["trail_r_mm"] for s in steps],
         }
+
+    if sim_type in FULL_VEHICLE_TYPES:
+        atts = {k: [get_wheel_attitude(s[k]) if s.get(k) else {"camber": None, "caster": None, "toe": None}
+                     for s in steps] for k in ("fl", "fr", "rl", "rr")}
+        series = {"input": [s["input"] for s in steps]}
+        for k in ("fl", "fr", "rl", "rr"):
+            series[f"{k}_camber_deg"] = [a["camber"] for a in atts[k]]
+            series[f"{k}_caster_deg"] = [a["caster"] for a in atts[k]]
+            series[f"{k}_toe_deg"]    = [a["toe"] for a in atts[k]]
+        series.update({
+            "front_track_mm":         [s["front_track_mm"] for s in steps],
+            "rear_track_mm":          [s["rear_track_mm"] for s in steps],
+            "front_track_change_mm":  [s["front_track_change_mm"] for s in steps],
+            "rear_track_change_mm":   [s["rear_track_change_mm"] for s in steps],
+            "wheelbase_mm":           [s["wheelbase_mm"] for s in steps],
+            "wheelbase_change_mm":    [s["wheelbase_change_mm"] for s in steps],
+            "pitch_angle_deg":        [s["pitch_angle_deg"] for s in steps],
+            "front_roll_angle_deg":   [s["front_roll_angle_deg"] for s in steps],
+            "rear_roll_angle_deg":    [s["rear_roll_angle_deg"] for s in steps],
+            "front_roll_center_y_mm": [s["front_roll_center_y_mm"] for s in steps],
+            "front_roll_center_z_mm": [s["front_roll_center_z_mm"] for s in steps],
+            "rear_roll_center_y_mm":  [s["rear_roll_center_y_mm"] for s in steps],
+            "rear_roll_center_z_mm":  [s["rear_roll_center_z_mm"] for s in steps],
+        })
+        return series
 
     if "x_val" in steps[0]:
         x_key, xs = steps[0].get("x_label", "input"), [s["x_val"] for s in steps]
