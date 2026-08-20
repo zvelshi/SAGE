@@ -258,6 +258,41 @@ def _bump_z_for_corner(z_wu: float, z_cog: float, phi: float, theta: float,
     z_body = z_cog + dz_static + (phi * dy_m - theta * dx_m) * 1000.0
     return float(z_wu - z_body)
 
+def _body_rotation(phi: float, theta: float) -> _Rot:
+    """Body rotation (roll about x = phi, pitch about y = theta) as a
+    scipy Rotation, applied to static-frame points/directions."""
+    return _Rot.from_euler('xy', [phi, theta])
+
+def _apply_body_transform(step: Dict, cog_static: np.ndarray, cog_world: np.ndarray,
+                           R_body: _Rot) -> Dict:
+    """Transform a solved corner step (in the static body frame) into the
+    world frame: positions are rotated about the CoG and translated,
+    direction vectors (e.g. wheel_axis) are rotated only."""
+    if step is None:
+        return step
+    cog_static = np.asarray(cog_static, float)
+    cog_world = np.asarray(cog_world, float)
+    # All world-space points a corner solver can return, across both corner
+    # types (double A-arm and semi-trailing link) — every one of these must
+    # move with the body, or it renders stuck at its static/ground position
+    # while the rest of the corner follows the body into the air.
+    pos_keys = (
+        "wc", "ubj", "lbj", "uf", "ur", "lf", "lr", "s_ib", "s_ob",
+        "piv_ib", "piv_ob", "tr_ib", "tr_ob",
+        "ucl_ib", "ucl_ob", "lcl_ib", "lcl_ob", "tl_f", "tl_f_upright",
+    )
+    dir_keys = ("wheel_axis",)
+    out = dict(step)
+    for k in pos_keys:
+        if out.get(k) is not None:
+            p = np.asarray(out[k], float)
+            out[k] = cog_world + R_body.apply(p - cog_static)
+    for k in dir_keys:
+        if out.get(k) is not None:
+            v = np.asarray(out[k], float)
+            out[k] = R_body.apply(v)
+    return out
+
 def calculate_ackermann_percentage(
     inner_toe: float, 
     outer_toe: float, 
