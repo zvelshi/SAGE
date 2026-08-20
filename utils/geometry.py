@@ -67,9 +67,11 @@ def get_caster_angle(step: Dict) -> float:
     v = step["ubj"] - step["lbj"]
     return np.rad2deg(np.arctan2(v[0], v[2]))
 
-def get_contact_patch(step: Dict, wr: float) -> np.ndarray:
+def get_contact_patch(step: Dict | None, wr: float) -> np.ndarray:
     """Tyre contact centre: the wheel-radius vector from wc, tilted by camber,
-    that points most toward the ground."""
+    that points most toward the ground. NaN vector for a missing (failed-solve) step."""
+    if not step:
+        return np.full(3, np.nan)
     wc = np.asarray(step["wc"], float)
     axis = np.asarray(step["wheel_axis"], float)
     down = np.array([0., 0., -1.])
@@ -149,9 +151,9 @@ def get_mechanical_trail(step: Dict, wr: float) -> float:
     return float(np.linalg.norm(perp))
 
 def contact_patch_z_series(steps: list, wr: float) -> np.ndarray:
-    """Tyre contact-centre height across a sequence of steps."""
+    """Tyre contact-centre height across a sequence of steps. NaN for any failed-solve step."""
     if not wr:
-        return np.array([s["wc"][2] for s in steps], dtype=float)
+        return np.array([s["wc"][2] if s else np.nan for s in steps], dtype=float)
     return np.array([get_contact_patch(s, wr)[2] for s in steps], dtype=float)
 
 def motion_ratio_series(steps: list, wr: float = 0.0) -> np.ndarray:
@@ -162,7 +164,7 @@ def motion_ratio_series(steps: list, wr: float = 0.0) -> np.ndarray:
     difference derivative w.r.t. shock length (not index), which is robust to
     uneven step spacing (e.g. steer sweeps)."""
     contact_z = contact_patch_z_series(steps, wr)
-    shock_len = np.array([s["shock_length"] for s in steps], dtype=float)
+    shock_len = np.array([s["shock_length"] if s else np.nan for s in steps], dtype=float)
     if len(steps) < 2:
         return np.zeros_like(shock_len)
     with np.errstate(divide="ignore", invalid="ignore"):
