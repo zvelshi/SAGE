@@ -11,6 +11,7 @@ import numpy as np
 import optimization.objectives as opt_objs
 from models.vehicle import Vehicle
 from simulations.scenarios.kin.front_steer import FrontSteerScenario
+from simulations.scenarios.kin.full_vehicle import FullVehicleScenario, FULL_VEHICLE_TYPES
 from simulations.scenarios.kin.extremepoints import ExtremePoints
 from simulations.scenarios.kin.sweep import SuspensionSweep
 from simulations.scenarios.dyn.shock_dyno import ShockDyno
@@ -33,16 +34,19 @@ def _run_kin(kin_text: str, sim_type: str):
     with open(f"config/hardpoints/{cfg['HARDPOINTS']}.yml") as f:
         hp_data = yaml.safe_load(f)
     vehicle = Vehicle(hp_data)
-    corner_id = [
-        1 if cfg.get("SIDE") == "right" else 0,
-        1 if cfg.get("HALF") == "rear"  else 0,
-    ]
+
     if sim_type == "front_steer":
+        corner_id = [0, 0]
         steps = FrontSteerScenario(vehicle, cfg).run()
+    elif sim_type in FULL_VEHICLE_TYPES:
+        corner_id = [0, 0]
+        steps = FullVehicleScenario(vehicle, cfg, mode=sim_type).run()
     elif sim_type == "extreme":
+        corner_id = [1 if cfg.get("SIDE") == "right" else 0, 1 if cfg.get("HALF") == "rear" else 0]
         steps = ExtremePoints(vehicle, cfg).run()
         export_extreme_points_to_xlsx(steps, run_dir, cfg, template_path="utils/HARDPOINTS_TEMPLATE.xlsx")
     else:
+        corner_id = [1 if cfg.get("SIDE") == "right" else 0, 1 if cfg.get("HALF") == "rear" else 0]
         steps = SuspensionSweep(vehicle, cfg).run()
 
     export_kin_run_data(run_dir, sim_type, steps, vehicle, corner_id, cfg.get('HARDPOINTS'))
