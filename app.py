@@ -32,8 +32,23 @@ DYN_PATH = "config/dyn_config.yml"
 OPT_PATH = "config/opt_config.yml"
 
 TAB_PATH  = {"kin": KIN_PATH, "dyn": DYN_PATH, "opt": OPT_PATH}
+
+KIN_SIM_GROUPS = [
+    ("Corner Vehicle", ["travel", "steer", "droop_steer", "jounce_steer", "left_travel", "right_travel", "sweep_space"]),
+    ("Half Vehicle", ["front_steer"]),
+    ("Full Vehicle", ["extreme"]),
+]
+
+def _grouped_options(groups):
+    opts = {}
+    for title, items in groups:
+        opts[f"__sep__{title}"] = f"── {title} ──"
+        for it in items:
+            opts[it] = it
+    return opts
+
 SIM_TYPES = {
-    "kin": ["travel", "steer", "droop_steer", "jounce_steer", "left_travel", "right_travel", "sweep_space", "extreme", "front_steer"],
+    "kin": _grouped_options(KIN_SIM_GROUPS),
     "dyn": ["static", "shock_dyno"],
     "opt": ["run"],
 }
@@ -141,7 +156,7 @@ def main_page():
 
             with ui.row().classes("w-full items-center gap-2 px-2 py-2 border-t border-stone-200 bg-stone-50").style("flex-shrink:0"):
                 mode_sel = ui.select(list(SIM_TYPES), value="kin",  label="Mode").classes("w-20").props("dense outlined")
-                subtype_sel = ui.select(SIM_TYPES["kin"], value=SIM_TYPES["kin"][0], label="Type").classes("w-36").props("dense outlined")
+                subtype_sel = ui.select(SIM_TYPES["kin"], value="travel", label="Type").classes("w-36").props("dense outlined")
                 save_btn = ui.button("Save").props("unelevated dense").classes("bg-stone-700 text-white text-sm px-3")
                 preview_btn = ui.button("Preview", icon="visibility").props("outline dense").classes("text-stone-700 border-stone-300 text-sm px-3")
                 preview_btn.visible = False
@@ -191,13 +206,19 @@ def main_page():
         mode_ref["v"] = e.value
         opts = SIM_TYPES[e.value]
         subtype_sel.options = opts
-        subtype_sel.value   = opts[0]
-        type_ref["v"]       = opts[0]
+        first = next(iter(opts)) if isinstance(opts, dict) else opts[0]
+        if isinstance(opts, dict) and first.startswith("__sep__"):
+            first = next(v for v in opts if not v.startswith("__sep__"))
+        subtype_sel.value = first
+        type_ref["v"]     = first
         tabs.set_value(e.value)
         active_tab["v"] = e.value
         preview_btn.visible = (e.value == "opt")
 
     def on_type_change(e):
+        if isinstance(e.value, str) and e.value.startswith("__sep__"):
+            subtype_sel.value = type_ref["v"]
+            return
         type_ref["v"] = e.value
 
     def do_save():
