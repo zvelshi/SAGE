@@ -1,0 +1,145 @@
+# default
+from typing import List, Dict
+from math import atan2, degrees
+
+# third-party
+import numpy as np
+
+# ours
+from simulations.scenarios.base import Scenario
+from simulations.solvers import SingleCornerSolver
+from utils.geometry import roll_center_yz, get_contact_patch
+from utils.misc import log_to_file
+
+FULL_VEHICLE_TYPES = {"roll", "heave"}
+
+class FullVehicleScenario(Scenario):
+    """Sweeps all four corners together -- 'heave' moves all four the same direction
+    (jounce -> droop), 'roll' moves the left and right sides oppositely (each side's
+    front/rear corners moving together). Driven by wheel-centre vertical travel
+    (bump_z), not shock travel: front and rear have different motion ratios, so an
+    equal shock travel_mm on every corner does NOT move the wheels by equal amounts
+    and the 3D view looks unsynced. bump_z shifts each wheel centre by the same
+    absolute Z regardless of that corner's motion ratio, keeping the visualization
+    genuinely synced. The bump_z range is calibrated from how far the front-left wheel
+    actually travels across TRAVEL.MIN..MAX, so it stays in the same ballpark as the
+    other kin scenarios' travel range."""
+
+    def __init__(self, vehicle, config, mode: str):
+        self.config = config
+        self.mode = mode
+        self.fl_solver = SingleCornerSolver(vehicle, corner_id=[0, 0])
+        self.fr_solver = SingleCornerSolver(vehicle, corner_id=[1, 0])
+        self.rl_solver = SingleCornerSolver(vehicle, corner_id=[0, 1])
+        self.rr_solver = SingleCornerSolver(vehicle, corner_id=[1, 1])
+        fl_hp, fr_hp = vehicle.front_left.hardpoints, vehicle.front_right.hardpoints
+        rl_hp, rr_hp = vehicle.rear_left.hardpoints, vehicle.rear_right.hardpoints
+        self.wr_front, self.wr_rear = fl_hp.wr, rl_hp.wr
+        self.static_front_track = abs(fl_hp.wc[1] - fr_hp.wc[1])
+        self.static_rear_track  = abs(rl_hp.wc[1] - rr_hp.wc[1])
+        self.static_wheelbase = (fl_hp.wc[0] + fr_hp.wc[0]) / 2.0 - (rl_hp.wc[0] + rr_hp.wc[0]) / 2.0
+
+        tmin, tmax = config['TRAVEL']['MIN'], config['TRAVEL']['MAX']
+        probe = SingleCornerSolver(vehicle, corner_id=[0, 0])
+        at_min = probe.solve(steer_mm=0.0, travel_mm=tmin)
+        at_max = probe.solve(steer_mm=0.0, travel_mm=tmax)
+        self.bump_min = (at_min['wc'][2] - fl_hp.wc[2]) if at_min else tmin
+        self.bump_max = (at_max['wc'][2] - fl_hp.wc[2]) if at_max else tmax
+
+        # Roll centre height is conventionally quoted above the ground (the tyre
+        # contact patch at static ride height), not above the hardpoints' raw Z=0 --
+        # those don't coincide here (Z=0 sits ~15mm below the static contact patch).
+        fl0 = self.fl_solver.solve(steer_mm=0.0, bump_z=0.0)
+        rl0 = self.rl_solver.solve(steer_mm=0.0, bump_z=0.0)
+        self.front_ground_z = get_contact_patch(fl0, self.wr_front)[2] if fl0 else 0.0
+        self.rear_ground_z  = get_contact_patch(rl0, self.wr_rear)[2] if rl0 else 0.0
+
+    def _build_step(self, t, fl, fr, rl, rr, perturbed) -> Dict:
+        front_track = abs(fl['wc'][1] - fr['wc'][1])
+        rear_track  = abs(rl['wc'][1] - rr['wc'][1])
+        front_x = (fl['wc'][0] + fr['wc'][0]) / 2.0
+        rear_x  = (rl['wc'][0] + rr['wc'][0]) / 2.0
+        wheelbase = front_x - rear_x
+        front_avg_z = (fl['wc'][2] + fr['wc'][2]) / 2.0
+        rear_avg_z  = (rl['wc'][2] + rr['wc'][2]) / 2.0
+        # abs(wheelbase): this repo's X axis runs front->rear (rear corners sit at a
+        # larger X than front), so the signed front_x - rear_x is negative here -- using
+        # it directly in atan2 would flip the angle into the far quadrant near +-180 deg.
+        pitch_angle_deg = degrees(atan2(rear_avg_z - front_avg_z, abs(wheelbase))) if wheelbase else 0.0
+        front_roll_angle_deg = degrees(atan2(fl['wc'][2] - fr['wc'][2], front_track)) if front_track else 0.0
+        rear_roll_angle_deg  = degrees(atan2(rl['wc'][2] - rr['wc'][2], rear_track)) if rear_track else 0.0
+        fl_p, fl_m, fr_p, fr_m, rl_p, rl_m, rr_p, rr_m = perturbed
+        front_rc = roll_center_yz(fl, fl_p, fl_m, fr, fr_p, fr_m, self.wr_front)
+        rear_rc  = roll_center_yz(rl, rl_p, rl_m, rr, rr_p, rr_m, self.wr_rear)
+
+        return {
+            "input": t, "fl": fl, "fr": fr, "rl": rl, "rr": rr,
+            "front_track_mm": front_track, "rear_track_mm": rear_track,
+            "front_track_change_mm": front_track - self.static_front_track,
+            "rear_track_change_mm": rear_track - self.static_rear_track,
+            "wheelbase_mm": wheelbase, "wheelbase_change_mm": wheelbase - self.static_wheelbase,
+            "pitch_angle_deg": pitch_angle_deg,
+            "front_roll_angle_deg": front_roll_angle_deg, "rear_roll_angle_deg": rear_roll_angle_deg,
+            "front_roll_center_y_mm": front_rc[0] if front_rc is not None else None,
+            "front_roll_center_z_mm": (front_rc[1] - self.front_ground_z) if front_rc is not None else None,
+            "rear_roll_center_y_mm": rear_rc[0] if rear_rc is not None else None,
+            "rear_roll_center_z_mm": (rear_rc[1] - self.rear_ground_z) if rear_rc is not None else None,
+        }
+
+    def _nan_step(self, t, fl, fr, rl, rr) -> Dict:
+        return {
+            "input": t, "fl": fl, "fr": fr, "rl": rl, "rr": rr,
+            "front_track_mm": np.nan, "rear_track_mm": np.nan,
+            "front_track_change_mm": np.nan, "rear_track_change_mm": np.nan,
+            "wheelbase_mm": np.nan, "wheelbase_change_mm": np.nan,
+            "pitch_angle_deg": np.nan,
+            "front_roll_angle_deg": np.nan, "rear_roll_angle_deg": np.nan,
+            "front_roll_center_y_mm": None, "front_roll_center_z_mm": None,
+            "rear_roll_center_y_mm": None, "rear_roll_center_z_mm": None,
+        }
+
+    # Roll-centre construction needs each corner's small-bump-perturbed neighbours
+    # (see utils.geometry.roll_center_yz) -- this is the +/- bump_z step used for that.
+    _RC_EPS = 1.0
+
+    def run(self) -> List[Dict]:
+        steps = []
+        log_to_file(f"Starting FullVehicleScenario: {self.mode} mode")
+        bmin, bmax = self.bump_min, self.bump_max
+        # heave sweeps jounce -> droop (all four corners together); roll sweeps
+        # droop -> jounce since it's paired against a mirrored opposite-side value
+        travel_vals = (np.linspace(bmax, bmin, self.config['SIM_STEPS']) if self.mode == "heave"
+                        else np.linspace(bmin, bmax, self.config['SIM_STEPS']))
+
+        for b in travel_vals:
+            b_mirror = bmin + bmax - b
+            if self.mode == "heave":
+                fl_b = fr_b = rl_b = rr_b = b
+            else:
+                fl_b = rl_b = b
+                fr_b = rr_b = b_mirror
+
+            fl = self.fl_solver.solve(steer_mm=0.0, bump_z=fl_b)
+            fr = self.fr_solver.solve(steer_mm=0.0, bump_z=fr_b)
+            rl = self.rl_solver.solve(steer_mm=0.0, bump_z=rl_b)
+            rr = self.rr_solver.solve(steer_mm=0.0, bump_z=rr_b)
+
+            if fl and fr and rl and rr:
+                eps = self._RC_EPS
+                perturbed = (
+                    self.fl_solver.solve(steer_mm=0.0, bump_z=fl_b + eps),
+                    self.fl_solver.solve(steer_mm=0.0, bump_z=fl_b - eps),
+                    self.fr_solver.solve(steer_mm=0.0, bump_z=fr_b + eps),
+                    self.fr_solver.solve(steer_mm=0.0, bump_z=fr_b - eps),
+                    self.rl_solver.solve(steer_mm=0.0, bump_z=rl_b + eps),
+                    self.rl_solver.solve(steer_mm=0.0, bump_z=rl_b - eps),
+                    self.rr_solver.solve(steer_mm=0.0, bump_z=rr_b + eps),
+                    self.rr_solver.solve(steer_mm=0.0, bump_z=rr_b - eps),
+                )
+                steps.append(self._build_step(b, fl, fr, rl, rr, perturbed))
+            else:
+                log_to_file(f"[WARN] Full vehicle {self.mode} step failed at input {b:.2f}mm. "
+                            f"FL={bool(fl)} FR={bool(fr)} RL={bool(rl)} RR={bool(rr)}")
+                steps.append(self._nan_step(b, fl, fr, rl, rr))
+
+        return steps
