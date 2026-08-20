@@ -10,6 +10,11 @@ import numpy as np
 # ours
 from simulations.scenarios.base import Scenario
 from utils.misc import log_to_file
+from utils.dynamics import (
+    derivatives, euler_step, solve_all_corners, build_step_dict, initial_shock_lengths,
+    CORNERS_ATTR, IDX_Z_COG, IDX_PHI, IDX_THETA, IDX_DZ_COG, IDX_DPHI, IDX_DTHETA,
+    IDX_Z_WU, IDX_DZ_WU,
+)
 
 def _noop_progress(*_): pass
 
@@ -92,7 +97,7 @@ class StaticDrop(Scenario):
         for step_i in range(hoist_steps):
 
             # Euler: body stays pinned, only advance wheel DOFs
-            deriv, shock_lengths, _ = derivatives(state, vehicle, shock_lengths, dt)
+            deriv, shock_lengths = derivatives(state, vehicle, shock_lengths, dt)
             state[IDX_Z_WU] = state[IDX_Z_WU] + dt * deriv[IDX_Z_WU]
             state[IDX_DZ_WU] = state[IDX_DZ_WU] + dt * deriv[IDX_DZ_WU]
 
@@ -134,11 +139,11 @@ class StaticDrop(Scenario):
         settle_window_s = 0.5
         settle_window_steps = max(1, round(settle_window_s / dt))
         z_cog_history: deque = deque(maxlen=settle_window_steps)
-        contact_logged = [False]
+        contact_logged = False
         log_pct_next = log_10pct_d
 
         for step_i in range(drop_steps):
-            state, shock_lengths, _ = euler_step(state, dt, vehicle, shock_lengths)
+            state, shock_lengths = euler_step(state, dt, vehicle, shock_lengths)
             t += dt
             viz_accum += dt
 
@@ -147,7 +152,7 @@ class StaticDrop(Scenario):
                 cs = solve_all_corners(state, vehicle, cog_static)
                 steps.append(build_step_dict(state, cs, vehicle, t, "drop"))
 
-            if not contact_logged[0]:
+            if not contact_logged:
                 wheel_r = vehicle.front_left.wheel.radius
                 z_wu = state[IDX_Z_WU]
                 labels = ["FL", "FR", "RL", "RR"]
@@ -156,7 +161,7 @@ class StaticDrop(Scenario):
                     print(f"  [DROP]  t={t:.3f} s — first ground contact: "
                           f"{', '.join(in_contact)}")
                     log_to_file(f"StaticDrop: first contact t={t:.3f} s: {in_contact}")
-                    contact_logged[0] = True
+                    contact_logged = True
 
             if step_i + 1 >= log_pct_next:
                 pct = (step_i + 1) / drop_steps

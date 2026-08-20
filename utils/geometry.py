@@ -247,6 +247,17 @@ def dash_segments(center: np.ndarray, axis: np.ndarray, length_mm: float,
         segments.append((center + axis * t0, center + axis * t1))
     return segments
 
+def _bump_z_for_corner(z_wu: float, z_cog: float, phi: float, theta: float,
+                        wc_stat: np.ndarray, cog_static: np.ndarray) -> float:
+    """Vertical suspension travel input for the corner's kinematic solver: the
+    wheel-centre world z minus where it would sit if rigidly attached to the
+    body at its static offset, given the body's current heave/roll/pitch."""
+    dx_m = (wc_stat[0] - cog_static[0]) * 0.001
+    dy_m = (wc_stat[1] - cog_static[1]) * 0.001
+    dz_static = wc_stat[2] - cog_static[2]
+    z_body = z_cog + dz_static + (phi * dy_m - theta * dx_m) * 1000.0
+    return float(z_wu - z_body)
+
 def calculate_ackermann_percentage(
     inner_toe: float, 
     outer_toe: float, 
