@@ -7,10 +7,10 @@ import numpy as np
 # ours
 from simulations.scenarios.base import Scenario
 from simulations.solvers import SingleCornerSolver
-from utils.geometry import calculate_ackermann_percentage, get_toe_angle
+from utils.geometry import calculate_ackermann_percentage, get_toe_angle, get_mechanical_trail
 from utils.misc import log_to_file
 
-class AckermannScenario(Scenario):
+class FrontSteerScenario(Scenario):
     """
     Simulates both front wheels steering to calculate Ackermann percentage.
     """
@@ -20,6 +20,8 @@ class AckermannScenario(Scenario):
         self.config = config
         self.l_solver = SingleCornerSolver(vehicle, corner_id=[0, 0])
         self.r_solver = SingleCornerSolver(vehicle, corner_id=[1, 0])
+        self.wr_l = vehicle.front_left.hardpoints.wr
+        self.wr_r = vehicle.front_right.hardpoints.wr
 
     def run(self) -> List[Dict]:
         results = []
@@ -29,8 +31,8 @@ class AckermannScenario(Scenario):
         tw = abs(self.vehicle.front_left.hardpoints.wc[1] - self.vehicle.front_right.hardpoints.wc[1])
 
         steer_steps = np.linspace(
-            self.config['STEER']['MIN'], 
-            self.config['STEER']['MAX'], 
+            self.config['STEER']['MIN'],
+            self.config['STEER']['MAX'],
             self.config['SIM_STEPS']
         )
 
@@ -44,16 +46,26 @@ class AckermannScenario(Scenario):
                 toe_l = get_toe_angle(left)
                 toe_r = get_toe_angle(right)
 
-                if steer < 0: 
-                    ack_pct = calculate_ackermann_percentage(toe_l, toe_r, tw, wb)
-                else:
+                if steer < 0:
                     ack_pct = calculate_ackermann_percentage(toe_r, toe_l, tw, wb)
+                else:
+                    ack_pct = calculate_ackermann_percentage(toe_l, toe_r, tw, wb)
+
+                track_mm = abs(left['wc'][1] - right['wc'][1])
+
+                trail_l = get_mechanical_trail(left, self.wr_l) if 'lbj' in left and 'ubj' in left else None
+                trail_r = get_mechanical_trail(right, self.wr_r) if 'lbj' in right and 'ubj' in right else None
 
                 results.append({
                     "input": input,
                     "left": left,
                     "right": right,
-                    "ackermann_pct": ack_pct
+                    "ackermann_pct": ack_pct,
+                    "toe_l_deg": toe_l,
+                    "toe_r_deg": toe_r,
+                    "track_change_mm": track_mm - tw,
+                    "trail_l_mm": trail_l,
+                    "trail_r_mm": trail_r,
                 })
             else:
                 log_to_file(f"[WARN] Ackermann step failed at input {input:.2f}. Left={bool(left)}, Right={bool(right)}")
@@ -62,6 +74,11 @@ class AckermannScenario(Scenario):
                     "left": left,
                     "right": right,
                     "ackermann_pct": np.nan,
+                    "toe_l_deg": np.nan,
+                    "toe_r_deg": np.nan,
+                    "track_change_mm": np.nan,
+                    "trail_l_mm": None,
+                    "trail_r_mm": None,
                 })
-                
+
         return results
