@@ -7,7 +7,8 @@ SAGE is a Python-based simulation suite for designing, analyzing, and optimizing
 * **Kinematic Analysis (`kin`)**:
     * **Sweep Suspension**: Travel (Bump/Droop), Steering, and combined interactions (Droop/Steer, Jounce/Steer).
     * **Calculated Metrics**: Camber, Caster, Toe, and CV Joint angles.
-    * **Ackermann Geometry**: Analyze steering geometry percentages and curves across full rack travel.
+    * **Front Steer (Ackermann) Geometry**: Analyze steering geometry percentages and curves across full rack travel.
+    * **Axle Travel (Heave/Roll)**: Sweep both corners of an axle together — same-direction (heave) or opposite (roll) — for camber/caster/toe/motion-ratio, track change, and roll center.
     * **Extreme Points**: Resolve global bounds of outboard points through full travel/steer and export directly to XLSX for use in CAD.
 * **Dynamic Simulation (`dyn`)**:
     * **Static/Drop Simulation**: Solves for chassis equilibrium (Heave, Pitch, Roll) and simulates the vehicle response to a full-vehicle drop using ODE integrators. 
@@ -76,7 +77,7 @@ python app.py
 Useful for batch processing and scripting. Outputs interactive matplotlib plots and a `run.log`/config snapshot under `out/`.
 
 #### Kinematics
-Runs a geometric sweep or Ackermann/extreme-points analysis (see [Kinematic Simulations](#kinematic-simulations-kin) below).
+Runs a geometric sweep or front-steer/axle-travel/extreme-points analysis (see [Kinematic Simulations](#kinematic-simulations-kin) below).
 ```bash
 python main.py kin --config config/kin_config.yml
 ```
@@ -109,9 +110,11 @@ Set `SIMULATION` in `config/kin_config.yml` to one of:
 | `left_travel` / `right_travel` | Sweeps travel while steer is held at `STEER.MIN` / `STEER.MAX`. |
 | `sweep_space` | Full 2D sweep: `TRAVEL` (outer) × `STEER` (inner), `SIM_STEPS × SIM_STEPS` result rows. |
 | `extreme` | Resolves the extreme (max jounce/max droop) outboard-point positions at neutral/full-left/full-right steer, for **all four corners** at once, and exports them to `out/kin_sim/<timestamp>/HARDPOINTS_<name>.xlsx` (via the template at `utils/HARDPOINTS_TEMPLATE.xlsx`) for use in CAD. |
-| `ackermann` | Sweeps both front corners together across `STEER.MIN..MAX` and computes toe angle / Ackermann percentage (ignores `HALF`/`SIDE`). |
+| `front_steer` | Sweeps both front corners together across `STEER.MIN..MAX` and computes toe angle / Ackermann percentage, track change, and mechanical trail (ignores `HALF`/`SIDE`). |
+| `heave` | Sweeps all four corners together across `TRAVEL.MAX..MIN` (jounce to droop, ride motion), computing per-corner camber/caster/toe/motion-ratio, front/rear track change, wheelbase change, pitch angle, front/rear roll angle, and (front, double-A-arm only) roll center Y/Z. |
+| `roll` | Sweeps all four corners: the left side (front-left + rear-left) across `TRAVEL.MIN..MAX` while the right side sweeps `TRAVEL.MAX..MIN` (opposite) — a true full-vehicle roll, same metrics as `heave`. |
 
-`HALF`/`SIDE` (`'front'`/`'rear'`, `'left'`/`'right'`) select which single corner is simulated for the single-corner sweep types (`travel`, `steer`, `droop_steer`, `jounce_steer`, `left_travel`, `right_travel`, `sweep_space`). They're ignored by `ackermann` (always both fronts) and `extreme` (always all four corners).
+`HALF`/`SIDE` (`'front'`/`'rear'`, `'left'`/`'right'`) select which single corner is simulated for the single-corner sweep types (`travel`, `steer`, `droop_steer`, `jounce_steer`, `left_travel`, `right_travel`, `sweep_space`). They're ignored by `front_steer` (always both fronts) and `extreme`/`heave`/`roll` (always all four corners).
 
 `SIM_STEPS` controls sweep resolution (number of samples across the travel/steer range).
 
@@ -121,7 +124,7 @@ Set `SIMULATION` in `config/kin_config.yml` to one of:
 # config/kin_config.yml
 HARDPOINTS: '2026'
 SIM_STEPS:  XXX
-SIMULATION: 'travel'      # travel | steer | droop_steer | jounce_steer | left_travel | right_travel | sweep_space | extreme | ackermann
+SIMULATION: 'travel'      # travel | steer | droop_steer | jounce_steer | left_travel | right_travel | sweep_space | extreme | front_steer | heave | roll
 
 HALF: 'front'             # 'front' or 'rear'
 SIDE: 'right'             # 'left' or 'right'
@@ -134,7 +137,7 @@ STEER:
   MAX:  XX                # [mm] rack travel
 ```
 
-Calculated per-step metrics include camber, caster, toe, kingpin/steering-axis geometry, CV joint angle, motion ratio, and (for `ackermann`) Ackermann percentage.
+Calculated per-step metrics include camber, caster, toe, kingpin/steering-axis geometry, CV joint angle, motion ratio, and (for `front_steer`) Ackermann percentage, track change, and mechanical trail, and (for `heave`/`roll`) front/rear track width and wheelbase change, pitch/roll angle, and roll center Y/Z.
 
 ---
 
@@ -243,7 +246,7 @@ COLLISION_GROUPS:
 | Objective | Scenario evaluated | Cost |
 |---|---|---|
 | `MinimumBumpSteer` | `travel` (fixed) | Penalizes peak toe angle and total toe swing across the bump/droop sweep. |
-| `ParallelSteer` | `ackermann` (fixed) | RMSE of Ackermann percentage across the steer sweep — pushes toward 100% (parallel) or a custom target curve. |
+| `ParallelSteer` | `front_steer` (fixed) | RMSE of Ackermann percentage across the steer sweep — pushes toward 100% (parallel) or a custom target curve. |
 | `PointToPointCollision` | `COLLISION_SCENARIO` (default `droop_steer`) | Average penetration depth summed across all non-exempt `KEEPOUT_ZONES` pairs over the sweep. |
 
 Every objective receives the full merged `kin_config.yml` + `opt_config.yml` dict, so scenario-specific keys (e.g. `TRAVEL`, `STEER`, `SIM_STEPS`) still apply during optimization.
