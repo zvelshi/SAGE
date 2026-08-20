@@ -358,4 +358,6 @@ def calculate_ackermann_percentage(
 
     theta_2 = np.rad2deg(np.arctan(1.0 / (cot_center + hw_ratio)))
 
-    return ((theta_3 - theta_4) / (theta_1 - theta_2)) * 100.0
+    # Negated to match Lotus Shark's sign convention (verified against its front-steer
+    # report: e.g. actual/ideal toe-split ratio +1.27% there reads as Ackermann% = -1.27).
+    return -((theta_3 - theta_4) / (theta_1 - theta_2)) * 100.0
