@@ -22,6 +22,8 @@ class FrontSteerScenario(Scenario):
         self.r_solver = SingleCornerSolver(vehicle, corner_id=[1, 0])
         self.wr_l = vehicle.front_left.hardpoints.wr
         self.wr_r = vehicle.front_right.hardpoints.wr
+        self.rl_static = SingleCornerSolver(vehicle, corner_id=[0, 1]).solve(bump_z=0.0)
+        self.rr_static = SingleCornerSolver(vehicle, corner_id=[1, 1]).solve(bump_z=0.0)
 
     def run(self) -> List[Dict]:
         results = []
@@ -60,6 +62,7 @@ class FrontSteerScenario(Scenario):
                     "input": input,
                     "left": left,
                     "right": right,
+                    "fl": left, "fr": right, "rl": self.rl_static, "rr": self.rr_static,
                     "ackermann_pct": ack_pct,
                     "toe_l_deg": toe_l,
                     "toe_r_deg": toe_r,
@@ -73,6 +76,7 @@ class FrontSteerScenario(Scenario):
                     "input": input,
                     "left": left,
                     "right": right,
+                    "fl": left, "fr": right, "rl": self.rl_static, "rr": self.rr_static,
                     "ackermann_pct": np.nan,
                     "toe_l_deg": np.nan,
                     "toe_r_deg": np.nan,
