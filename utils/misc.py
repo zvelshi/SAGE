@@ -35,7 +35,11 @@ class DualLogger(object):
 
     def write(self, message):
         """Standard print() calls go here: Terminal + File"""
-        self.terminal.write(message)
+        try:
+            self.terminal.write(message)
+        except UnicodeEncodeError:
+            enc = getattr(self.terminal, "encoding", None) or "ascii"
+            self.terminal.write(message.encode(enc, errors="replace").decode(enc))
         if message:
             self.buffer += message
             if "\n" in self.buffer:
