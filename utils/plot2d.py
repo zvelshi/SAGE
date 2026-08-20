@@ -331,7 +331,7 @@ def _build_dyn_stats(steps, corner_wr=None):
         stats.append((f"{label} Toe (After Settle) [°]", f"{att['toe']:.2f}"))
     return stats
 
-def _build_ackermann_figures(steps, cmp_steps=None, cmp_label="Compare"):
+def _build_front_steer_figures(steps, cmp_steps=None, cmp_label="Compare"):
     xs = [s["input"] for s in steps]
     ys = [s["ackermann_pct"] for s in steps]
     traces = [go.Scatter(x=xs, y=ys, mode="lines", name="Current" if cmp_steps else None,
@@ -349,7 +349,50 @@ def _build_ackermann_figures(steps, cmp_steps=None, cmp_label="Compare"):
                     yaxis_title="%",
                     showlegend=bool(cmp_steps),
                     shapes=[_vline_shape(xs[0])])
-    return [("ackermann_pct", f)], xs
+
+    def mfig(title, y, extra_traces=None, y_title=None):
+        traces = [go.Scatter(x=xs, y=y, mode="lines", name="Current" if cmp_steps else None,
+                              line=dict(color=_COLORS[0], width=2))]
+        if extra_traces:
+            traces.extend(extra_traces)
+        fig = go.Figure(data=traces)
+        fig.update_layout(**_LAYOUT_BASE,
+                          title=dict(text=title, font=dict(size=11)),
+                          xaxis_title="Rack Travel [mm]",
+                          yaxis_title=y_title,
+                          showlegend=bool(cmp_steps) or (extra_traces is not None),
+                          shapes=[_vline_shape(xs[0])])
+        return fig
+
+    def cmp_trace(y, name=None, color=_C_CMP, dash="dash"):
+        return go.Scatter(x=c_xs, y=y, mode="lines", name=name or cmp_label,
+                           line=dict(color=color, width=2, dash=dash))
+
+    track_change_ys = [s["track_change_mm"] for s in steps]
+    if cmp_steps:
+        c_track_change_ys = [s["track_change_mm"] for s in cmp_steps]
+
+    track_change_fig = mfig("Track Change [mm]", track_change_ys,
+        [cmp_trace(c_track_change_ys)] if cmp_steps else None)
+
+    toe_traces = [
+        go.Scatter(x=xs, y=[s["toe_l_deg"] for s in steps], mode="lines", name="Left",
+                   line=dict(color=_COLORS[4], width=2)),
+        go.Scatter(x=xs, y=[s["toe_r_deg"] for s in steps], mode="lines", name="Right",
+                   line=dict(color=_COLORS[4], width=2, dash="dash")),
+    ]
+    if cmp_steps:
+        toe_traces.append(cmp_trace([s["toe_l_deg"] for s in cmp_steps], name=f"{cmp_label} Left", color=_C_CMP))
+        toe_traces.append(cmp_trace([s["toe_r_deg"] for s in cmp_steps], name=f"{cmp_label} Right", color=_C_CMP2))
+    toe_fig = go.Figure(data=toe_traces)
+    toe_fig.update_layout(**_LAYOUT_BASE, title=dict(text="Toe [°]", font=dict(size=11)),
+                          xaxis_title="Rack Travel [mm]", showlegend=True, shapes=[_vline_shape(xs[0])])
+
+    return [
+        ("ackermann_pct", f),
+        ("track_change", track_change_fig),
+        ("toe", toe_fig),
+    ], xs
 
 def rank_solutions(F: np.ndarray) -> np.ndarray:
     """Return indices into F sorted best-first, by normalized Euclidean distance
