@@ -22,7 +22,7 @@ SAGE is a Python-based simulation suite for designing, analyzing, and optimizing
 ## Installation
 
 ### Prerequisites
-* **Python 3.8+** installed. (Ensure "Add Python to PATH" is checked during installation).
+* **Python 3.11** installed (see `.python-version`). Other versions may work but are not tested. (Ensure "Add Python to PATH" is checked during installation).
 
 ### Setup Steps
 1.  **Clone or Download** this repository.
@@ -38,9 +38,24 @@ SAGE is a Python-based simulation suite for designing, analyzing, and optimizing
     source venv/bin/activate
     ```
 4.  **Install Dependencies**:
+
+    For general use:
     ```bash
     pip install -e .
     ```
+
+    For the environment that exactly matches the devs:
+    ```bash
+    pip install -r requirements-lock.txt
+    pip install -e . --no-deps
+    ```
+
+    If you add, remove, or intentionally upgrade a dependency, update it in `pyproject.toml` first, then regenerate the lockfile so everyone else picks up the same versions:
+    ```bash
+    pip install -e . --upgrade
+    pip freeze | grep -v "^-e " > requirements-lock.txt
+    ```
+    Commit the updated `requirements-lock.txt` alongside your `pyproject.toml` change.
 
 ---
 

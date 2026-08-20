@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "baja_suspension"
+version = "0.3"
+description = "SAGE (Suspension Analysis & Geometry Evaluator) - kinematic and dynamic suspension analysis/optimization suite"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=2.4,<3",
+    "scipy>=1.17,<2",
+    "matplotlib>=3.10,<4",
+    "PyYAML>=6.0,<7",
+    "pymoo>=0.6.1,<0.7",
+    "openpyxl>=3.1,<4",
+    "pandas>=3.0,<4",
+    "nicegui>=3.13,<4",
+    "plotly>=6.8,<7",
+]
+
+[tool.setuptools.packages.find]
+include = ["models*", "simulations*", "optimization*", "utils*"]
