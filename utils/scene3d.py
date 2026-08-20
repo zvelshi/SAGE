@@ -7,7 +7,6 @@ from utils.geometry import (
     align_y_to_direction, shock_body_end as _shock_body_end,
     axle_plunge_point as _axle_plunge_point, dash_segments,
 )
-
 # constants
 _S = 1.0 / 1000.0 # mm -> scene units
 
@@ -283,12 +282,12 @@ def _build_dyn_scene(scene, step, vehicle) -> dict:
             if step.get(key) is not None:
                 objs[key] = _build_corner_objects(scene, step[key], corner.hardpoints,
                                                    c_struct=c_struct, show_guides=False)
-        cog = step["cog_pos"]
-        objs["cog"] = (
-            scene.sphere(radius=0.05)
-            .material(_cog_color(step.get("phase", "drop")))
-            .move(*_v(cog))
-        )
+        if step.get("cog_pos") is not None:
+            objs["cog"] = (
+                scene.sphere(radius=0.05)
+                .material(_cog_color(step.get("phase", "drop")))
+                .move(*_v(step["cog_pos"]))
+            )
     return objs
 
 def _build_shock_dyno_scene(scene, step) -> dict:
@@ -341,9 +340,8 @@ def _update_dyn_scene(objs: dict, step, vehicle) -> None:
         corner = getattr(vehicle, attr)
         if key in objs and step.get(key) is not None:
             _update_corner_objects(objs[key], step[key], corner.hardpoints)
-    if "cog" in objs:
-        cog = step["cog_pos"]
-        objs["cog"].move(*_v(cog))
+    if "cog" in objs and step.get("cog_pos") is not None:
+        objs["cog"].move(*_v(step["cog_pos"]))
         objs["cog"].material(_cog_color(step.get("phase", "drop")))
 
 
