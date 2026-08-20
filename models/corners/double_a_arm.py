@@ -25,6 +25,21 @@ class DoubleAArmNumeric:
             self.s_rel_pt = hp.ubj
         else:
             self.s_rel_pt = hp.lbj
+        self.sh_vec = hp.s_ob - self.s_rel_pt
+
+        # The shock/damper outboard point is rigidly attached to whichever wishbone
+        # owns s_rel_pt ("Damper to Lower/Upper Wishbone"), and that wishbone rotates
+        # about its OWN fixed inboard-pivot axis -- a different (single-DOF) rotation
+        # from the upright's full 6-DOF pose solved for in solve(). Precompute that
+        # axis and the ball joint's static radius vector from it so solve() can derive
+        # the wishbone's live rotation angle from how far the ball joint has swung.
+        axis_p1, axis_p2 = (hp.uf, hp.ur) if hp.s_loc == 'upper' else (hp.lf, hp.lr)
+        axis_dir = axis_p2 - axis_p1
+        self._sh_axis_n = axis_dir / np.linalg.norm(axis_dir)
+        foot = axis_p1 + np.dot(self.s_rel_pt - axis_p1, self._sh_axis_n) * self._sh_axis_n
+        self._sh_axis_foot = foot
+        self._sh_v0 = self.s_rel_pt - foot
+        self._sh_v0_normsq = float(np.dot(self._sh_v0, self._sh_v0))
 
         # passive axle
         self.axle_static_len = np.linalg.norm(hp.piv_ob - hp.piv_ib)
@@ -48,7 +63,23 @@ class DoubleAArmNumeric:
     @staticmethod
     def _rot(eul: np.ndarray) -> np.ndarray:
         return R.from_euler("xyz", eul).as_matrix()
-    
+
+    def _shock_outboard(self, current_ball: np.ndarray) -> np.ndarray:
+        """Current shock/damper outboard point, given the live position of the ball
+        joint (ubj or lbj, matching s_loc) that its owning wishbone also carries.
+        Derives that wishbone's rotation angle about its fixed pivot axis from how
+        current_ball has swung relative to its static position, via Rodrigues'
+        rotation formula (cheaper per-call than building a scipy Rotation)."""
+        axis = self._sh_axis_n
+        v1 = current_ball - self._sh_axis_foot
+        denom = np.sqrt(self._sh_v0_normsq * np.dot(v1, v1))
+        cos_t = np.dot(self._sh_v0, v1) / denom
+        sin_t = np.dot(np.cross(self._sh_v0, v1), axis) / denom
+        v = self.sh_vec
+        v_rot = (v * cos_t + np.cross(axis, v) * sin_t
+                 + axis * np.dot(axis, v) * (1.0 - cos_t))
+        return current_ball + v_rot
+
     def solve(
             self,
             travel_mm : float | None = None,
@@ -74,10 +105,6 @@ class DoubleAArmNumeric:
         tr_ob_loc = hp.tr_ob - hp.lbj
         wc_loc = hp.wc - hp.lbj
 
-        # local coords
-        s_rel_pt = hp.ubj if hp.s_loc == 'upper' else hp.lbj
-        sh_vec = hp.s_ob - s_rel_pt
-
         def res(x):
             p, e = x[:3], x[3:]
             Rw = self._rot(e)
@@ -89,7 +116,7 @@ class DoubleAArmNumeric:
             wc    = world(wc_loc)
 
             s_rel_pt_loc = ubj if hp.s_loc == 'upper' else lbj
-            sha   = s_rel_pt_loc + sh_vec
+            sha   = self._shock_outboard(s_rel_pt_loc)
 
             r = np.empty(6)
             
@@ -142,7 +169,7 @@ class DoubleAArmNumeric:
         tr_ob = world(tr_ob_loc)
         
         s_rel_pt_loc = ubj if hp.s_loc == 'upper' else lbj
-        sha = s_rel_pt_loc + sh_vec
+        sha = self._shock_outboard(s_rel_pt_loc)
 
         # axle calcs
         piv_ob = world(self.piv_ob_loc)
