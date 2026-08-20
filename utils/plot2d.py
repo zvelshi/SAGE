@@ -394,6 +394,114 @@ def _build_front_steer_figures(steps, cmp_steps=None, cmp_label="Compare"):
         ("toe", toe_fig),
     ], xs
 
+def _build_full_vehicle_figures(steps, mode="heave", wr_front=0.0, wr_rear=0.0,
+                                 cmp_steps=None, cmp_label="Compare"):
+    """Camber/toe/caster/motion-ratio FL/FR/RL/RR overlays plus track-change, wheelbase-change,
+    pitch-angle, roll-angle, and (front, where the corner geometry supports it) roll-center
+    Y/Z, for a full-vehicle pitch or roll sweep."""
+    xs = [s["input"] for s in steps]
+    x0 = xs[0] if xs else 0.0
+    x_label = "Shock Travel [mm]"
+
+    _NO_ATT = {"camber": None, "caster": None, "toe": None}
+
+    def _atts(steps_list, key):
+        return [get_wheel_attitude(s[key]) if s.get(key) else _NO_ATT for s in steps_list]
+
+    def _mr(steps_list, key, wr):
+        return motion_ratio_series([s[key] for s in steps_list], wr=wr)
+
+    corner_wr = {"fl": wr_front, "fr": wr_front, "rl": wr_rear, "rr": wr_rear}
+    atts = {k: _atts(steps, k) for k in ("fl", "fr", "rl", "rr")}
+    mr = {k: _mr(steps, k, corner_wr[k]) for k in ("fl", "fr", "rl", "rr")}
+
+    c_xs = c_atts = c_mr = None
+    if cmp_steps:
+        c_xs = [s["input"] for s in cmp_steps]
+        c_atts = {k: _atts(cmp_steps, k) for k in ("fl", "fr", "rl", "rr")}
+        c_mr = {k: _mr(cmp_steps, k, corner_wr[k]) for k in ("fl", "fr", "rl", "rr")}
+
+    def cmp_trace(y, name=None, color=_C_CMP, dash="dash"):
+        return go.Scatter(x=c_xs, y=y, mode="lines", name=name or cmp_label,
+                           line=dict(color=color, width=2, dash=dash))
+
+    _CORNER_STYLE = [
+        ("fl", _C_FRONT, "solid"), ("fr", _C_FRONT, "dot"),
+        ("rl", _C_REAR, "solid"), ("rr", _C_REAR, "dot"),
+    ]
+
+    def corner_fig(title, y_by_corner, c_y_by_corner=None):
+        traces = [go.Scatter(x=xs, y=y_by_corner[k], mode="lines", name=k.upper(),
+                              line=dict(color=color, width=2, dash=dash))
+                  for k, color, dash in _CORNER_STYLE]
+        if cmp_steps:
+            for k, color, dash in _CORNER_STYLE:
+                traces.append(cmp_trace(c_y_by_corner[k], name=f"{cmp_label} {k.upper()}",
+                                         color=_C_CMP if k in ("fl", "rl") else _C_CMP2, dash=dash))
+        fig = go.Figure(data=traces)
+        fig.update_layout(**_LAYOUT_BASE, title=dict(text=title, font=dict(size=11)),
+                          xaxis_title=x_label, showlegend=True, shapes=[_vline_shape(x0)])
+        return fig
+
+    def mfig(title, y, c_y=None):
+        traces = [go.Scatter(x=xs, y=y, mode="lines", name="Current" if cmp_steps else None,
+                              line=dict(color=_COLORS[0], width=2))]
+        if cmp_steps:
+            traces.append(cmp_trace(c_y))
+        fig = go.Figure(data=traces)
+        fig.update_layout(**_LAYOUT_BASE, title=dict(text=title, font=dict(size=11)),
+                          xaxis_title=x_label, showlegend=bool(cmp_steps), shapes=[_vline_shape(x0)])
+        return fig
+
+    def fr_fig(title, front_y, rear_y, c_front_y=None, c_rear_y=None):
+        traces = [
+            go.Scatter(x=xs, y=front_y, mode="lines", name="Front", line=dict(color=_COLORS[0], width=2)),
+            go.Scatter(x=xs, y=rear_y, mode="lines", name="Rear", line=dict(color=_COLORS[0], width=2, dash="dash")),
+        ]
+        if cmp_steps:
+            traces.append(cmp_trace(c_front_y, name=f"{cmp_label} Front", color=_C_CMP))
+            traces.append(cmp_trace(c_rear_y, name=f"{cmp_label} Rear", color=_C_CMP2))
+        fig = go.Figure(data=traces)
+        fig.update_layout(**_LAYOUT_BASE, title=dict(text=title, font=dict(size=11)),
+                          xaxis_title=x_label, showlegend=True, shapes=[_vline_shape(x0)])
+        return fig
+
+    figs = [
+        ("camber", corner_fig("Camber [°]", {k: [a["camber"] for a in atts[k]] for k in atts},
+            {k: [a["camber"] for a in c_atts[k]] for k in c_atts} if cmp_steps else None)),
+        ("toe", corner_fig("Toe [°]", {k: [a["toe"] for a in atts[k]] for k in atts},
+            {k: [a["toe"] for a in c_atts[k]] for k in c_atts} if cmp_steps else None)),
+        ("caster", corner_fig("Caster [°]", {k: [a["caster"] for a in atts[k]] for k in atts},
+            {k: [a["caster"] for a in c_atts[k]] for k in c_atts} if cmp_steps else None)),
+        ("motion_ratio", corner_fig("Motion Ratio [-]", {k: mr[k].tolist() for k in mr},
+            {k: c_mr[k].tolist() for k in c_mr} if cmp_steps else None)),
+        ("track_change", fr_fig("Track Change [mm]",
+            [s["front_track_change_mm"] for s in steps], [s["rear_track_change_mm"] for s in steps],
+            [s["front_track_change_mm"] for s in cmp_steps] if cmp_steps else None,
+            [s["rear_track_change_mm"] for s in cmp_steps] if cmp_steps else None)),
+        ("wheelbase_change", mfig("Wheelbase Change [mm]", [s["wheelbase_change_mm"] for s in steps],
+            [s["wheelbase_change_mm"] for s in cmp_steps] if cmp_steps else None)),
+        ("pitch_angle", mfig("Pitch Angle [°]", [s["pitch_angle_deg"] for s in steps],
+            [s["pitch_angle_deg"] for s in cmp_steps] if cmp_steps else None)),
+        ("roll_angle", fr_fig("Roll Angle [°]",
+            [s["front_roll_angle_deg"] for s in steps], [s["rear_roll_angle_deg"] for s in steps],
+            [s["front_roll_angle_deg"] for s in cmp_steps] if cmp_steps else None,
+            [s["rear_roll_angle_deg"] for s in cmp_steps] if cmp_steps else None)),
+    ]
+
+    if any(s.get("front_roll_center_z_mm") is not None or s.get("rear_roll_center_z_mm") is not None for s in steps):
+        figs.append(("roll_center_z", fr_fig("Roll Center Height [mm]",
+            [s["front_roll_center_z_mm"] for s in steps], [s["rear_roll_center_z_mm"] for s in steps],
+            [s["front_roll_center_z_mm"] for s in cmp_steps] if cmp_steps else None,
+            [s["rear_roll_center_z_mm"] for s in cmp_steps] if cmp_steps else None)))
+    if any(s.get("front_roll_center_y_mm") is not None or s.get("rear_roll_center_y_mm") is not None for s in steps):
+        figs.append(("roll_center_y", fr_fig("Roll Center Lateral Position [mm]",
+            [s["front_roll_center_y_mm"] for s in steps], [s["rear_roll_center_y_mm"] for s in steps],
+            [s["front_roll_center_y_mm"] for s in cmp_steps] if cmp_steps else None,
+            [s["rear_roll_center_y_mm"] for s in cmp_steps] if cmp_steps else None)))
+
+    return figs, xs
+
 def rank_solutions(F: np.ndarray) -> np.ndarray:
     """Return indices into F sorted best-first, by normalized Euclidean distance
     to the ideal point (0,...,0) across all objectives. Works for any n_obj >= 1."""
