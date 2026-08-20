@@ -150,6 +150,41 @@ def get_mechanical_trail(step: Dict, wr: float) -> float:
     perp = v - np.dot(v, axis_side) * axis_side
     return float(np.linalg.norm(perp))
 
+def _line_intersect_2d(p1, d1, p2, d2):
+    """Intersection of two 2D lines given as point+direction. Returns None if parallel."""
+    A = np.array([[d1[0], -d2[0]], [d1[1], -d2[1]]])
+    b = p2 - p1
+    det = np.linalg.det(A)
+    if abs(det) < 1e-9:
+        return None
+    t = np.linalg.solve(A, b)[0]
+    return p1 + t * d1
+
+def _contact_patch_perp_yz(step: Dict, step_plus: Dict, step_minus: Dict, wr: float):
+    """Point + direction (Y-Z) of the line through the contact patch, perpendicular to
+    its own path tangent under a small +/- bump_z perturbation. This is the Lotus Shark
+    roll-centre construction: 'a small bump step... allows a perpendicular plane to be
+    constructed to this path at the current contact point.' Returns (None, None) if any
+    of the three steps failed to solve, or the path has no in-plane motion."""
+    if not step or not step_plus or not step_minus:
+        return None, None
+    cp, cp_p, cp_m = (get_contact_patch(s, wr)[1:] for s in (step, step_plus, step_minus))
+    tangent = cp_p - cp_m
+    if np.linalg.norm(tangent) < 1e-9:
+        return None, None
+    return cp, np.array([-tangent[1], tangent[0]])
+
+def roll_center_yz(step_l: Dict, step_l_plus: Dict, step_l_minus: Dict,
+                    step_r: Dict, step_r_plus: Dict, step_r_minus: Dict, wr: float):
+    """Roll centre: intersection of each side's contact-patch perpendicular-to-path
+    line (see _contact_patch_perp_yz). 'the intersection of this plane with... the
+    other side's plane (roll)'. Returns [y, z] or None if unavailable."""
+    p_l, d_l = _contact_patch_perp_yz(step_l, step_l_plus, step_l_minus, wr)
+    p_r, d_r = _contact_patch_perp_yz(step_r, step_r_plus, step_r_minus, wr)
+    if p_l is None or p_r is None:
+        return None
+    return _line_intersect_2d(p_l, d_l, p_r, d_r)
+
 def contact_patch_z_series(steps: list, wr: float) -> np.ndarray:
     """Tyre contact-centre height across a sequence of steps. NaN for any failed-solve step."""
     if not wr:
