@@ -19,7 +19,7 @@ class OptimizationObjective(ABC):
 
     @abstractmethod
     def get_scenario_type(self) -> str:
-        """Returns the key of the scenario class to run ('steer', 'travel', 'ackermann')."""
+        """Returns the key of the scenario class to run ('steer', 'travel', 'front_steer')."""
         pass
 
     @property
@@ -47,7 +47,7 @@ class ParallelSteer(OptimizationObjective):
             return rmse/1400.0
     
     def get_scenario_type(self):
-        return 'ackermann'
+        return 'front_steer'
 
 class PointToPointCollision(OptimizationObjective):
     """

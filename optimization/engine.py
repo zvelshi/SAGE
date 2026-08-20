@@ -13,7 +13,7 @@ from pymoo.operators.mutation.pm import PolynomialMutation
 
 # ours
 from models.vehicle import Vehicle
-from simulations.scenarios.kin.ackermann import AckermannScenario
+from simulations.scenarios.kin.front_steer import FrontSteerScenario
 from simulations.scenarios.kin.sweep import SuspensionSweep
 from utils.misc import log_to_file
 
@@ -141,8 +141,8 @@ class SuspensionOptimizer:
         """
         if key in ['steer', 'travel', 'droop_steer', 'jounce_steer', "left_travel", "right_travel", "sweep_space"]: 
             return SuspensionSweep
-        if key == 'ackermann': 
-            return AckermannScenario
+        if key == 'front_steer':
+            return FrontSteerScenario
         raise ValueError(f"Unknown scenario type: {key}")
 
     def run(self):
