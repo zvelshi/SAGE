@@ -18,9 +18,10 @@ from utils.scene3d import (_build_scene, _update_scene, _fit_camera,
                             _build_shock_dyno_scene, _update_shock_dyno_scene, _fit_camera_shock_dyno,
                             _build_config_preview_scene, build_legend_entries, _FREE_POINT_COLOR,
                             _resolve_point_attr)
-from utils.plot2d import (_build_kin_figures, _build_front_steer_figures, _build_opt_figures,
-                           _move_vline, _build_dyn_figures, _build_dyno_figures,
-                           _build_sweep_space_figures, rank_solutions)
+from utils.plot2d import (_build_kin_figures, _build_front_steer_figures,
+                           _build_full_vehicle_figures, _build_opt_figures, _move_vline, _build_dyn_figures,
+                           _build_dyno_figures, _build_sweep_space_figures, rank_solutions)
+from simulations.scenarios.kin.full_vehicle import FULL_VEHICLE_TYPES
 from models.vehicle import Vehicle
 from utils.misc import add_console_subscriber, remove_console_subscriber
 
@@ -36,7 +37,7 @@ TAB_PATH  = {"kin": KIN_PATH, "dyn": DYN_PATH, "opt": OPT_PATH}
 KIN_SIM_GROUPS = [
     ("Corner Vehicle", ["travel", "steer", "droop_steer", "jounce_steer", "left_travel", "right_travel", "sweep_space"]),
     ("Half Vehicle", ["front_steer"]),
-    ("Full Vehicle", ["extreme"]),
+    ("Full Vehicle", ["extreme", "heave", "roll"]),
 ]
 
 def _grouped_options(groups):
@@ -687,6 +688,11 @@ def main_page():
             half_label = "Rear" if corner_id[1] == 1 else "Front"
             if sim_type == "front_steer":
                 named_figs, xs = _build_front_steer_figures(steps, cmp_steps=cmp_steps, cmp_label=cmp_label or "Compare")
+            elif sim_type in FULL_VEHICLE_TYPES:
+                named_figs, xs = _build_full_vehicle_figures(steps, mode=sim_type,
+                                                               wr_front=vehicle.front_left.hardpoints.wr,
+                                                               wr_rear=vehicle.rear_left.hardpoints.wr,
+                                                               cmp_steps=cmp_steps, cmp_label=cmp_label or "Compare")
             else:
                 named_figs, xs = _build_kin_figures(steps, half_label=half_label, wr=hp.wr, sim_type=sim_type,
                                                      cmp_steps=cmp_steps, cmp_wr=(cmp_hp.wr if cmp_hp else 0.0),
