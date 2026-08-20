@@ -257,34 +257,15 @@ def _update_corner_objects(o, step, hp):
         _move_wheel(o["wheel"], step["wc"], step.get("wheel_axis", ax_default))
         o["sp_wc"].move(*_v(step["wc"]))
 
-def _build_scene(scene, step, sim_type, vehicle, hp):
+def _build_scene(scene, step, hp):
     """Build all scene objects once. Returns scene_objs dict."""
     with scene:
-        if sim_type == "ackermann":
-            objs = {}
-            if "left"  in step:
-                objs["left"]  = _build_corner_objects(scene, step["left"],
-                                                       vehicle.front_left.hardpoints,
-                                                       c_struct="#003cb4")
-            if "right" in step:
-                objs["right"] = _build_corner_objects(scene, step["right"],
-                                                       vehicle.front_right.hardpoints,
-                                                       c_struct="#b42800")
-        else:
-            objs = _build_corner_objects(scene, step, hp)
+        objs = _build_corner_objects(scene, step, hp)
     return objs
 
-def _update_scene(scene_objs, step, sim_type, vehicle, hp):
+def _update_scene(scene_objs, step, hp):
     """Update all scene objects in-place for the new step. Zero allocation."""
-    if sim_type == "ackermann":
-        if "left"  in scene_objs and "left"  in step:
-            _update_corner_objects(scene_objs["left"],  step["left"],
-                                   vehicle.front_left.hardpoints)
-        if "right" in scene_objs and "right" in step:
-            _update_corner_objects(scene_objs["right"], step["right"],
-                                   vehicle.front_right.hardpoints)
-    else:
-        _update_corner_objects(scene_objs, step, hp)
+    _update_corner_objects(scene_objs, step, hp)
 
 def _cog_color(phase: str) -> str:
     if phase == "hoist":
@@ -550,7 +531,7 @@ def _build_config_preview_scene(scene, hp, free_points_cfg: dict, keepout_cfg: l
         objs["zones"] = zones
     return objs
 
-def _fit_camera(scene, step, sim_type, vehicle, hp):
+def _fit_camera(scene, step, hp):
     """Position camera to frame the geometry."""
     all_pts = []
 
@@ -562,11 +543,7 @@ def _fit_camera(scene, step, sim_type, vehicle, hp):
             if hasattr(h, attr):
                 all_pts.append(np.asarray(getattr(h, attr)))
 
-    if sim_type == "ackermann":
-        if "left"  in step: collect(step["left"],  vehicle.front_left.hardpoints)
-        if "right" in step: collect(step["right"], vehicle.front_right.hardpoints)
-    else:
-        collect(step, hp)
+    collect(step, hp)
 
     if not all_pts:
         return
