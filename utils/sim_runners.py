@@ -10,7 +10,7 @@ import numpy as np
 # ours
 import optimization.objectives as opt_objs
 from models.vehicle import Vehicle
-from simulations.scenarios.kin.ackermann import AckermannScenario
+from simulations.scenarios.kin.front_steer import FrontSteerScenario
 from simulations.scenarios.kin.extremepoints import ExtremePoints
 from simulations.scenarios.kin.sweep import SuspensionSweep
 from simulations.scenarios.dyn.shock_dyno import ShockDyno
@@ -37,8 +37,8 @@ def _run_kin(kin_text: str, sim_type: str):
         1 if cfg.get("SIDE") == "right" else 0,
         1 if cfg.get("HALF") == "rear"  else 0,
     ]
-    if sim_type == "ackermann":
-        steps = AckermannScenario(vehicle, cfg).run()
+    if sim_type == "front_steer":
+        steps = FrontSteerScenario(vehicle, cfg).run()
     elif sim_type == "extreme":
         steps = ExtremePoints(vehicle, cfg).run()
         export_extreme_points_to_xlsx(steps, run_dir, cfg, template_path="utils/HARDPOINTS_TEMPLATE.xlsx")
