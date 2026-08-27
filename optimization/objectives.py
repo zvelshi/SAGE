@@ -352,7 +352,7 @@ class CollisionObjective(OptimizationObjective):
 # only the amount by which it spills out:
 #
 #     violation(v) = max(0, min - v) + max(0, v - max)
-#     cost         = aggregate(violation) / cost_scale
+#     cost         = aggregate(all violations) / cost_scale
 #
 # `stat` picks what `v` is:
 #   value    every swept step, each penalized on its own   (the default)
@@ -362,9 +362,14 @@ class CollisionObjective(OptimizationObjective):
 # angle below 30 deg" is stat=abs_max, max=30; "ground clearance reaches at
 # least 406.4 mm somewhere in the heave sweep" is stat=max, min=406.4.
 #
+# Several stats can be bounded at once via `bounds:` (stat -> {min?, max?}), e.g.
+# clearance whose peak is >= 406.4 AND whose dip never drops below 76.2:
+#     bounds: {max: {min: 406.4}, min: {min: 76.2}}
+# The scalar `stat`/`min`/`max` form is just sugar for a single-entry `bounds`.
+#
 # Spec fields: name, metric, scenario, cost_scale (default 1.0), aggregate
-# (default max_abs -- the worst violation), `stat` (default value), and `min`
-# and/or `max` (at least one). Any NaN/failed step -> 1e2 infeasibility penalty.
+# (default max_abs -- the worst violation), and either `stat`(default value) +
+# `min`/`max`, or a `bounds` mapping. Any NaN/failed step -> 1e2 penalty.
 #
 # The chain: MetricLimit <- MetricCeiling (max only) / MetricFloor (min only) /
 # MetricWindow (both, per-step).
@@ -391,19 +396,6 @@ class MetricLimit(OptimizationObjective):
             self.metric = spec["metric"]
         except KeyError as e:
             raise ValueError(f"objective '{self.name}' is missing required field {e}") from e
-        self.lo = None if spec.get("min") is None else float(spec["min"])
-        self.hi = None if spec.get("max") is None else float(spec["max"])
-        if self.lo is None and self.hi is None:
-            raise ValueError(
-                f"objective '{self.name}': type {spec.get('type')} needs a 'min' and/or 'max'"
-            )
-        if self.lo is not None and self.hi is not None and self.lo > self.hi:
-            raise ValueError(f"objective '{self.name}': min ({self.lo}) is above max ({self.hi})")
-        self.stat = spec.get("stat", self.default_stat)
-        if self.stat not in STAT_REDUCERS:
-            raise ValueError(
-                f"objective '{self.name}': unknown stat '{self.stat}' (options: {sorted(STAT_REDUCERS)})"
-            )
         self.cost_scale = float(spec.get("cost_scale", 1.0))
         self.aggregate = spec.get("aggregate", "max_abs")
         if self.aggregate not in AGGREGATES:
@@ -411,6 +403,29 @@ class MetricLimit(OptimizationObjective):
                 f"objective '{self.name}': unknown aggregate '{self.aggregate}' "
                 f"(options: {sorted(AGGREGATES)})"
             )
+        self.constraints = self._parse_constraints(spec)
+
+    def _parse_constraints(self, spec: dict):
+        """List of (stat, lo, hi). Reads `bounds` if given, else the scalar
+        `stat`/`min`/`max` form."""
+        raw = spec.get("bounds")
+        if raw is None:
+            raw = {spec.get("stat", self.default_stat): {"min": spec.get("min"), "max": spec.get("max")}}
+        out = []
+        for stat, band in raw.items():
+            if stat not in STAT_REDUCERS:
+                raise ValueError(
+                    f"objective '{self.name}': unknown stat '{stat}' (options: {sorted(STAT_REDUCERS)})"
+                )
+            band = band or {}
+            lo = None if band.get("min") is None else float(band["min"])
+            hi = None if band.get("max") is None else float(band["max"])
+            if lo is None and hi is None:
+                raise ValueError(f"objective '{self.name}': stat '{stat}' needs a 'min' and/or 'max'")
+            if lo is not None and hi is not None and lo > hi:
+                raise ValueError(f"objective '{self.name}': stat '{stat}' min ({lo}) is above max ({hi})")
+            out.append((stat, lo, hi))
+        return out
 
     def default_name(self):
         return self.spec.get("metric", self.__class__.__name__)
@@ -419,42 +434,49 @@ class MetricLimit(OptimizationObjective):
         vals = np.array([_resolve_metric(self.metric, s) for s in results], dtype=float)
         if not np.all(np.isfinite(vals)):
             return 1e2
-        v = STAT_REDUCERS[self.stat](vals)
-        violation = np.zeros_like(v, dtype=float)
-        if self.lo is not None:
-            violation = violation + np.clip(self.lo - v, 0.0, None)
-        if self.hi is not None:
-            violation = violation + np.clip(v - self.hi, 0.0, None)
-        return AGGREGATES[self.aggregate](violation) / self.cost_scale
+        parts = []
+        for stat, lo, hi in self.constraints:
+            v = STAT_REDUCERS[stat](vals)
+            viol = np.zeros_like(v, dtype=float)
+            if lo is not None:
+                viol = viol + np.clip(lo - v, 0.0, None)
+            if hi is not None:
+                viol = viol + np.clip(v - hi, 0.0, None)
+            parts.append(viol)
+        return AGGREGATES[self.aggregate](np.concatenate(parts)) / self.cost_scale
 
 
 class MetricCeiling(MetricLimit):
     """`type: ceiling` -- `metric` (or its `stat`) must stay at or below `max`."""
 
     def __init__(self, spec: dict, config: dict = None):
-        if spec.get("max") is None:
-            raise ValueError(
-                f"objective '{spec.get('name', spec.get('metric'))}': type ceiling requires 'max'"
-            )
-        super().__init__({**spec, "min": None}, config)
+        if spec.get("bounds") is None:
+            if spec.get("max") is None:
+                raise ValueError(
+                    f"objective '{spec.get('name', spec.get('metric'))}': type ceiling requires 'max'"
+                )
+            spec = {**spec, "min": None}
+        super().__init__(spec, config)
 
 
 class MetricFloor(MetricLimit):
     """`type: floor` -- `metric` (or its `stat`) must stay at or above `min`."""
 
     def __init__(self, spec: dict, config: dict = None):
-        if spec.get("min") is None:
-            raise ValueError(
-                f"objective '{spec.get('name', spec.get('metric'))}': type floor requires 'min'"
-            )
-        super().__init__({**spec, "max": None}, config)
+        if spec.get("bounds") is None:
+            if spec.get("min") is None:
+                raise ValueError(
+                    f"objective '{spec.get('name', spec.get('metric'))}': type floor requires 'min'"
+                )
+            spec = {**spec, "max": None}
+        super().__init__(spec, config)
 
 
 class MetricWindow(MetricLimit):
     """`type: window` -- `metric` must stay within [`min`, `max`] at every step."""
 
     def __init__(self, spec: dict, config: dict = None):
-        if spec.get("min") is None or spec.get("max") is None:
+        if spec.get("bounds") is None and (spec.get("min") is None or spec.get("max") is None):
             raise ValueError(
                 f"objective '{spec.get('name', spec.get('metric'))}': type window requires 'min' and 'max'"
             )
