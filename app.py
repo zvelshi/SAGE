@@ -11,6 +11,7 @@ from nicegui import ui, run
 
 # ours
 from utils.sim_runners import _run_kin, _run_opt, _run_dyn, _load_kin_run, _load_dyn_run, _load_opt_run
+from utils.config import parse_sweep_config, parse_opt_config, ConfigError
 from utils.export import (list_available_runs, build_kin_static_values, build_dyn_static_values,
                            load_kin_run_data, load_dyn_run_data, NO_COMPARE_SIM_TYPES)
 from utils import scene3d
@@ -418,6 +419,12 @@ def main_page():
         except asyncio.CancelledError:
             status_lbl.text = "Stopped."
             ui.notify("Simulation stopped.", type="warning", position="bottom-right")
+        except ConfigError as exc:
+            status_lbl.text = "Invalid configuration"
+            ui.notify(str(exc), type="negative", multi_line=True, timeout=12_000,
+                      classes="whitespace-pre-wrap")
+            with viz_area:
+                ui.label(str(exc)).classes("text-red-500 text-xs font-mono whitespace-pre-wrap")
         except Exception as exc:
             status_lbl.text = f"Error: {exc}"
             ui.notify(str(exc), type="negative", timeout=10_000)
@@ -620,12 +627,13 @@ def main_page():
 
     def do_preview():
         try:
-            kin_cfg = yaml.safe_load(editors["kin"].value)
-            opt_cfg = yaml.safe_load(editors["opt"].value)
+            kin_cfg = parse_sweep_config(yaml.safe_load(editors["kin"].value) or {}, "kin config").legacy_dict()
+            opt_cfg = parse_opt_config(yaml.safe_load(editors["opt"].value) or {}, "opt config").legacy_dict()
         except yaml.YAMLError as exc:
             ui.notify(f"YAML error: {exc}", type="negative"); return
-        if not kin_cfg or not isinstance(kin_cfg, dict):
-            ui.notify("Invalid kinematic config.", type="negative"); return
+        except ConfigError as exc:
+            ui.notify(str(exc), type="negative", multi_line=True, timeout=12_000,
+                      classes="whitespace-pre-wrap"); return
 
         hp_name = kin_cfg.get("HARDPOINTS")
         hp_path = f"config/hardpoints/{hp_name}.yml"

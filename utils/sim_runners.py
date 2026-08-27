@@ -9,6 +9,7 @@ import numpy as np
 
 # ours
 import optimization.objectives as opt_objs
+from utils.config import parse_sweep_config, parse_opt_config, parse_dyn_config
 from models.vehicle import Vehicle
 from simulations.scenarios.kin.front_steer import FrontSteerScenario
 from simulations.scenarios.kin.full_vehicle import FullVehicleScenario, FULL_VEHICLE_TYPES
@@ -26,9 +27,9 @@ def _run_kin(kin_text: str, sim_type: str):
     with open(os.path.join(run_dir, "kin_config.yml"), "w") as f:
         f.write(kin_text)
         
-    cfg = yaml.safe_load(kin_text)
+    cfg = parse_sweep_config(yaml.safe_load(kin_text) or {}, "kin config").legacy_dict()
     cfg["SIMULATION"] = sim_type
-    
+
     save_configs(run_dir, [], cfg.get('HARDPOINTS'))
     
     with open(f"config/hardpoints/{cfg['HARDPOINTS']}.yml") as f:
@@ -88,8 +89,8 @@ def _run_dyn(kin_text: str, dyn_text: str, sim_type: str, progress_store: dict |
     with open(os.path.join(run_dir, "dyn_config.yml"), "w") as f:
         f.write(dyn_text)
 
-    kin_cfg = yaml.safe_load(kin_text)
-    dyn_cfg = yaml.safe_load(dyn_text)
+    kin_cfg = parse_sweep_config(yaml.safe_load(kin_text) or {}, "kin config").legacy_dict()
+    dyn_cfg = parse_dyn_config(yaml.safe_load(dyn_text) or {}, "dyn config").legacy_dict()
 
     save_configs(run_dir, [], kin_cfg.get('HARDPOINTS'))
 
@@ -160,11 +161,11 @@ def _run_opt(kin_text: str, opt_text: str):
     with open(os.path.join(run_dir, "opt_config.yml"), "w") as f:
         f.write(opt_text)
         
-    kin_cfg = yaml.safe_load(kin_text)
-    opt_cfg = yaml.safe_load(opt_text)
-    
+    kin_cfg = parse_sweep_config(yaml.safe_load(kin_text) or {}, "kin config").legacy_dict()
+    opt_cfg = parse_opt_config(yaml.safe_load(opt_text) or {}, "opt config").legacy_dict()
+
     save_configs(run_dir, [], kin_cfg.get('HARDPOINTS'))
-    
+
     with open(f"config/hardpoints/{kin_cfg['HARDPOINTS']}.yml") as f:
         hp_data = yaml.safe_load(f)
     cfg = {**kin_cfg, **opt_cfg}
