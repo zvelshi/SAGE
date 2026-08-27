@@ -84,8 +84,27 @@ class OptimizationObjective(ABC):
 # Scenario-step keys that hold the sweep's independent variable, in priority order.
 SCENARIO_X_KEYS = ("x_val", "input")
 
+def _axle_plunge_mm(step: dict) -> float:
+    v = (step.get("axle_data") or {}).get("plunge_mm")
+    return float("nan") if v is None else float(v)
+
+
+def _axle_angle_deg(step: dict) -> float:
+    a = step.get("axle_data") or {}
+    ib, ob = a.get("angle_ib_deg"), a.get("angle_ob_deg")
+    return float("nan") if ib is None or ob is None else float(max(ib, ob))
+
+
+def _ground_clearance_mm(step: dict) -> float:
+    """The binding (smaller) of the front / rear ground clearances."""
+    vals = [step.get("front_ground_clearance_mm"), step.get("rear_ground_clearance_mm")]
+    vals = [v for v in vals if v is not None]
+    return float(min(vals)) if vals else float("nan")
+
+
 # Named metrics that need a helper to compute. Anything not listed here is read
-# as a plain scalar key off the step dict (e.g. 'ackermann_pct', 'track_change_mm').
+# as a plain scalar key off the step dict (e.g. 'ackermann_pct', 'track_change_mm'),
+# with dotted names ('axle_data.plunge_mm') walking into nested dicts.
 METRIC_RESOLVERS = {
     "toe_deg": get_toe_angle,
     "camber_deg": get_camber_angle,
@@ -93,6 +112,9 @@ METRIC_RESOLVERS = {
     "kingpin_angle_deg": get_kingpin_angle,
     "caster_trail_mm": get_caster_trail,
     "kingpin_offset_wc_mm": get_kingpin_offset_wheel,
+    "axle_plunge_mm": _axle_plunge_mm,
+    "axle_angle_deg": _axle_angle_deg,
+    "ground_clearance_mm": _ground_clearance_mm,
 }
 
 AGGREGATES = {
@@ -114,13 +136,19 @@ def _resolve_metric(metric: str, step: dict) -> float:
     fn = METRIC_RESOLVERS.get(metric)
     if fn is not None:
         return float(fn(step))
-    if metric in step:
-        val = step[metric]
-        return float("nan") if val is None else float(val)
-    raise KeyError(
-        f"unknown metric '{metric}': not in METRIC_RESOLVERS ({sorted(METRIC_RESOLVERS)}) "
-        f"and not a key on the scenario step"
-    )
+    node = step
+    for part in metric.split("."):
+        if not isinstance(node, dict) or part not in node:
+            raise KeyError(
+                f"unknown metric '{metric}': not in METRIC_RESOLVERS ({sorted(METRIC_RESOLVERS)}) "
+                f"and not a (dotted) key on the scenario step"
+            )
+        node = node[part]
+    if node is None:
+        return float("nan")
+    if isinstance(node, dict):
+        raise KeyError(f"metric '{metric}' resolves to a dict, not a scalar")
+    return float(node)
 
 
 class TargetCurve(OptimizationObjective):
@@ -316,6 +344,124 @@ class CollisionObjective(OptimizationObjective):
 
 
 # ---------------------------------------------------------------------------
+# Limit / bound objectives
+# ---------------------------------------------------------------------------
+#
+# Rather than tracking a metric to a target, these keep a metric -- or one
+# summary statistic of it across the sweep -- inside an allowed band, and cost
+# only the amount by which it spills out:
+#
+#     violation(v) = max(0, min - v) + max(0, v - max)
+#     cost         = aggregate(violation) / cost_scale
+#
+# `stat` picks what `v` is:
+#   value    every swept step, each penalized on its own   (the default)
+#   max | min | mean | range | abs_max     one scalar summarising the sweep
+#
+# So "plunge stays within +-15 mm" is stat=value, min=-15, max=15; "peak axle
+# angle below 30 deg" is stat=abs_max, max=30; "ground clearance reaches at
+# least 406.4 mm somewhere in the heave sweep" is stat=max, min=406.4.
+#
+# Spec fields: name, metric, scenario, cost_scale (default 1.0), aggregate
+# (default max_abs -- the worst violation), `stat` (default value), and `min`
+# and/or `max` (at least one). Any NaN/failed step -> 1e2 infeasibility penalty.
+#
+# The chain: MetricLimit <- MetricCeiling (max only) / MetricFloor (min only) /
+# MetricWindow (both, per-step).
+
+STAT_REDUCERS = {
+    "value": lambda a: a,
+    "max": lambda a: np.array([np.max(a)]),
+    "min": lambda a: np.array([np.min(a)]),
+    "mean": lambda a: np.array([np.mean(a)]),
+    "range": lambda a: np.array([np.max(a) - np.min(a)]),
+    "abs_max": lambda a: np.array([np.max(np.abs(a))]),
+}
+
+
+class MetricLimit(OptimizationObjective):
+    """`type: limit` -- keep `metric` (or its `stat` across the sweep) within
+    [`min`, `max`], costing only the excursion outside that band."""
+
+    default_stat = "value"
+
+    def __init__(self, spec: dict, config: dict = None):
+        super().__init__(spec, config)
+        try:
+            self.metric = spec["metric"]
+        except KeyError as e:
+            raise ValueError(f"objective '{self.name}' is missing required field {e}") from e
+        self.lo = None if spec.get("min") is None else float(spec["min"])
+        self.hi = None if spec.get("max") is None else float(spec["max"])
+        if self.lo is None and self.hi is None:
+            raise ValueError(
+                f"objective '{self.name}': type {spec.get('type')} needs a 'min' and/or 'max'"
+            )
+        if self.lo is not None and self.hi is not None and self.lo > self.hi:
+            raise ValueError(f"objective '{self.name}': min ({self.lo}) is above max ({self.hi})")
+        self.stat = spec.get("stat", self.default_stat)
+        if self.stat not in STAT_REDUCERS:
+            raise ValueError(
+                f"objective '{self.name}': unknown stat '{self.stat}' (options: {sorted(STAT_REDUCERS)})"
+            )
+        self.cost_scale = float(spec.get("cost_scale", 1.0))
+        self.aggregate = spec.get("aggregate", "max_abs")
+        if self.aggregate not in AGGREGATES:
+            raise ValueError(
+                f"objective '{self.name}': unknown aggregate '{self.aggregate}' "
+                f"(options: {sorted(AGGREGATES)})"
+            )
+
+    def default_name(self):
+        return self.spec.get("metric", self.__class__.__name__)
+
+    def calculate_cost(self, results):
+        vals = np.array([_resolve_metric(self.metric, s) for s in results], dtype=float)
+        if not np.all(np.isfinite(vals)):
+            return 1e2
+        v = STAT_REDUCERS[self.stat](vals)
+        violation = np.zeros_like(v, dtype=float)
+        if self.lo is not None:
+            violation = violation + np.clip(self.lo - v, 0.0, None)
+        if self.hi is not None:
+            violation = violation + np.clip(v - self.hi, 0.0, None)
+        return AGGREGATES[self.aggregate](violation) / self.cost_scale
+
+
+class MetricCeiling(MetricLimit):
+    """`type: ceiling` -- `metric` (or its `stat`) must stay at or below `max`."""
+
+    def __init__(self, spec: dict, config: dict = None):
+        if spec.get("max") is None:
+            raise ValueError(
+                f"objective '{spec.get('name', spec.get('metric'))}': type ceiling requires 'max'"
+            )
+        super().__init__({**spec, "min": None}, config)
+
+
+class MetricFloor(MetricLimit):
+    """`type: floor` -- `metric` (or its `stat`) must stay at or above `min`."""
+
+    def __init__(self, spec: dict, config: dict = None):
+        if spec.get("min") is None:
+            raise ValueError(
+                f"objective '{spec.get('name', spec.get('metric'))}': type floor requires 'min'"
+            )
+        super().__init__({**spec, "max": None}, config)
+
+
+class MetricWindow(MetricLimit):
+    """`type: window` -- `metric` must stay within [`min`, `max`] at every step."""
+
+    def __init__(self, spec: dict, config: dict = None):
+        if spec.get("min") is None or spec.get("max") is None:
+            raise ValueError(
+                f"objective '{spec.get('name', spec.get('metric'))}': type window requires 'min' and 'max'"
+            )
+        super().__init__(spec, config)
+
+
+# ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
 
@@ -324,6 +470,10 @@ OBJECTIVE_TYPES = {
     "target_range": TargetRange,
     "target_const": TargetConstant,
     "target_zero": TargetZero,
+    "limit": MetricLimit,
+    "ceiling": MetricCeiling,
+    "floor": MetricFloor,
+    "window": MetricWindow,
     "collision": CollisionObjective,
 }
 
