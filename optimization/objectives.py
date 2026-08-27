@@ -344,35 +344,28 @@ class CollisionObjective(OptimizationObjective):
 
 
 # ---------------------------------------------------------------------------
-# Limit / bound objectives
+# Limit objective
 # ---------------------------------------------------------------------------
 #
-# Rather than tracking a metric to a target, these keep a metric -- or one
-# summary statistic of it across the sweep -- inside an allowed band, and cost
-# only the amount by which it spills out:
+# Rather than tracking a metric to a target, this keeps chosen statistics of a
+# metric across the sweep inside bands, and costs only the spill-out:
 #
-#     violation(v) = max(0, min - v) + max(0, v - max)
-#     cost         = aggregate(all violations) / cost_scale
+#     violation = sum over (stat, band) of
+#                   max(0, band.min - stat(series)) + max(0, stat(series) - band.max)
+#     cost      = aggregate(all violations) / cost_scale
 #
-# `stat` picks what `v` is:
-#   value    every swept step, each penalized on its own   (the default)
+# `bounds` maps a stat -> {min?, max?}. Stats:
+#   value    every swept step, each penalized on its own
 #   max | min | mean | range | abs_max     one scalar summarising the sweep
 #
-# So "plunge stays within +-15 mm" is stat=value, min=-15, max=15; "peak axle
-# angle below 30 deg" is stat=abs_max, max=30; "ground clearance reaches at
-# least 406.4 mm somewhere in the heave sweep" is stat=max, min=406.4.
+# Examples:
+#   plunge stays within +-15 mm      -> bounds: {value:   {min: -15, max: 15}}
+#   peak axle angle below 30 deg     -> bounds: {abs_max: {max: 30}}
+#   clearance peak >= 406.4, dip >= 76.2
+#                                    -> bounds: {max: {min: 406.4}, min: {min: 76.2}}
 #
-# Several stats can be bounded at once via `bounds:` (stat -> {min?, max?}), e.g.
-# clearance whose peak is >= 406.4 AND whose dip never drops below 76.2:
-#     bounds: {max: {min: 406.4}, min: {min: 76.2}}
-# The scalar `stat`/`min`/`max` form is just sugar for a single-entry `bounds`.
-#
-# Spec fields: name, metric, scenario, cost_scale (default 1.0), aggregate
-# (default max_abs -- the worst violation), and either `stat`(default value) +
-# `min`/`max`, or a `bounds` mapping. Any NaN/failed step -> 1e2 penalty.
-#
-# The chain: MetricLimit <- MetricCeiling (max only) / MetricFloor (min only) /
-# MetricWindow (both, per-step).
+# Spec fields: name, metric, scenario, bounds, cost_scale (default 1.0),
+# aggregate (default max_abs -- the worst violation). NaN/failed step -> 1e2.
 
 STAT_REDUCERS = {
     "value": lambda a: a,
@@ -385,10 +378,8 @@ STAT_REDUCERS = {
 
 
 class MetricLimit(OptimizationObjective):
-    """`type: limit` -- keep `metric` (or its `stat` across the sweep) within
-    [`min`, `max`], costing only the excursion outside that band."""
-
-    default_stat = "value"
+    """`type: limit` -- keep the `bounds` statistics of `metric` inside their
+    bands, costing only the excursion outside."""
 
     def __init__(self, spec: dict, config: dict = None):
         super().__init__(spec, config)
@@ -403,14 +394,12 @@ class MetricLimit(OptimizationObjective):
                 f"objective '{self.name}': unknown aggregate '{self.aggregate}' "
                 f"(options: {sorted(AGGREGATES)})"
             )
-        self.constraints = self._parse_constraints(spec)
+        self.constraints = self._parse_bounds(spec.get("bounds"))
 
-    def _parse_constraints(self, spec: dict):
-        """List of (stat, lo, hi). Reads `bounds` if given, else the scalar
-        `stat`/`min`/`max` form."""
-        raw = spec.get("bounds")
-        if raw is None:
-            raw = {spec.get("stat", self.default_stat): {"min": spec.get("min"), "max": spec.get("max")}}
+    def _parse_bounds(self, raw):
+        """`bounds` (stat -> {min?, max?}) into a list of (stat, lo, hi)."""
+        if not raw:
+            raise ValueError(f"objective '{self.name}': type limit needs a 'bounds' mapping")
         out = []
         for stat, band in raw.items():
             if stat not in STAT_REDUCERS:
@@ -446,43 +435,6 @@ class MetricLimit(OptimizationObjective):
         return AGGREGATES[self.aggregate](np.concatenate(parts)) / self.cost_scale
 
 
-class MetricCeiling(MetricLimit):
-    """`type: ceiling` -- `metric` (or its `stat`) must stay at or below `max`."""
-
-    def __init__(self, spec: dict, config: dict = None):
-        if spec.get("bounds") is None:
-            if spec.get("max") is None:
-                raise ValueError(
-                    f"objective '{spec.get('name', spec.get('metric'))}': type ceiling requires 'max'"
-                )
-            spec = {**spec, "min": None}
-        super().__init__(spec, config)
-
-
-class MetricFloor(MetricLimit):
-    """`type: floor` -- `metric` (or its `stat`) must stay at or above `min`."""
-
-    def __init__(self, spec: dict, config: dict = None):
-        if spec.get("bounds") is None:
-            if spec.get("min") is None:
-                raise ValueError(
-                    f"objective '{spec.get('name', spec.get('metric'))}': type floor requires 'min'"
-                )
-            spec = {**spec, "max": None}
-        super().__init__(spec, config)
-
-
-class MetricWindow(MetricLimit):
-    """`type: window` -- `metric` must stay within [`min`, `max`] at every step."""
-
-    def __init__(self, spec: dict, config: dict = None):
-        if spec.get("bounds") is None and (spec.get("min") is None or spec.get("max") is None):
-            raise ValueError(
-                f"objective '{spec.get('name', spec.get('metric'))}': type window requires 'min' and 'max'"
-            )
-        super().__init__(spec, config)
-
-
 # ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
@@ -493,9 +445,6 @@ OBJECTIVE_TYPES = {
     "target_const": TargetConstant,
     "target_zero": TargetZero,
     "limit": MetricLimit,
-    "ceiling": MetricCeiling,
-    "floor": MetricFloor,
-    "window": MetricWindow,
     "collision": CollisionObjective,
 }
 
