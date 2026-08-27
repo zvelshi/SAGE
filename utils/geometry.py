@@ -5,195 +5,145 @@ from typing import Dict
 import numpy as np
 from scipy.spatial.transform import Rotation as _Rot
 
-def segment_segment_distance(p1: np.ndarray, p2: np.ndarray,
-                              q1: np.ndarray, q2: np.ndarray) -> float:
-    """Closest distance between segment p1-p2 and segment q1-q2 (3-D)."""
-    p1, p2, q1, q2 = (np.asarray(v, float) for v in (p1, p2, q1, q2))
-    d1 = p2 - p1
-    d2 = q2 - q1
-    r  = p1 - q1
-
-    a = np.dot(d1, d1)
-    e = np.dot(d2, d2)
-    f = np.dot(d2, r)
-
-    if a <= 1e-12 and e <= 1e-12:
-        return float(np.linalg.norm(r))
-
-    if a <= 1e-12:
-        s = 0.0
-        t = np.clip(f / e, 0.0, 1.0)
-    else:
-        c = np.dot(d1, r)
-        if e <= 1e-12:
-            t = 0.0
-            s = np.clip(-c / a, 0.0, 1.0)
-        else:
-            b = np.dot(d1, d2)
-            denom = a * e - b * b
-            s = np.clip((b * f - c * e) / denom, 0.0, 1.0) if denom > 1e-12 else 0.0
-            t = (b * s + f) / e
-            if t < 0.0:
-                t = 0.0
-                s = np.clip(-c / a, 0.0, 1.0)
-            elif t > 1.0:
-                t = 1.0
-                s = np.clip((b - c) / a, 0.0, 1.0)
-
-    closest_p = p1 + s * d1
-    closest_q = q1 + t * d2
-    return float(np.linalg.norm(closest_p - closest_q))
+# ours
+from utils.spatial import Point, Line
 
 def get_wheel_attitude(step: Dict[str, np.ndarray]) -> Dict[str, float]:
     return {
-        "camber": get_camber_angle(step), 
-        "toe": get_toe_angle(step), 
+        "camber": get_camber_angle(step),
+        "toe": get_toe_angle(step),
         "caster": get_caster_angle(step),
     }
 
 def get_camber_angle(step: Dict) -> float:
     n = step["wheel_axis"]
-    camber_rad = np.arcsin(n[2])
-    return -np.rad2deg(camber_rad)
+    return float(-np.rad2deg(np.arcsin(n[2])))
 
 def get_toe_angle(step: Dict) -> float:
     n = step["wheel_axis"]
-    toe_rad = np.arcsin(n[0])
-    return -np.rad2deg(toe_rad)
+    return float(-np.rad2deg(np.arcsin(n[0])))
 
 def get_caster_angle(step: Dict) -> float:
     if "ubj" not in step or "lbj" not in step:
         return 0.0
-    v = step["ubj"] - step["lbj"]
-    return np.rad2deg(np.arctan2(v[0], v[2]))
+    v = Point(step["ubj"]) - Point(step["lbj"])
+    return float(np.rad2deg(np.arctan2(v.x, v.z)))
 
 def get_contact_patch(step: Dict | None, wr: float) -> np.ndarray:
-    """Tyre contact centre: the wheel-radius vector from wc, tilted by camber,
+    """Tire contact center: the wheel-radius vector from wc, tilted by camber,
     that points most toward the ground. NaN vector for a missing (failed-solve) step."""
     if not step:
         return np.full(3, np.nan)
-    wc = np.asarray(step["wc"], float)
-    axis = np.asarray(step["wheel_axis"], float)
-    down = np.array([0., 0., -1.])
-    m = down - np.dot(down, axis) * axis
-    n = np.linalg.norm(m)
-    if n < 1e-9:
-        return wc + np.array([0., 0., -wr])
-    return wc + wr * (m / n)
+    wc = Point(step["wc"])
+    axis = Point(step["wheel_axis"])
+    down = Point(0.0, 0.0, -1.0)
+    # component of straight-down perpendicular to the spin axis
+    m = down - axis * down.dot(axis)
+    if m.norm < 1e-9:
+        return (wc + Point(0.0, 0.0, -wr)).array
+    return (wc + m.unit() * wr).array
+
+def _steering_axis(step: Dict) -> Line | None:
+    """The steering axis as a Line through the lower and upper ball joints."""
+    if "lbj" not in step or "ubj" not in step:
+        return None
+    try:
+        return Line.from_points(step["lbj"], step["ubj"])
+    except ValueError:
+        return None
 
 def _steering_axis_point_at_z(step: Dict, z: float) -> np.ndarray | None:
-    """Point where the steering axis (line through lbj/ubj) crosses height z."""
-    lbj = np.asarray(step["lbj"], float)
-    ubj = np.asarray(step["ubj"], float)
-    axis_up = ubj - lbj
-    if abs(axis_up[2]) < 1e-9:
+    """Point where the steering axis crosses height ``z``."""
+    axis = _steering_axis(step)
+    if axis is None:
         return None
-    t = (z - lbj[2]) / axis_up[2]
-    return lbj + t * axis_up
+    p = axis.at_z(z)
+    return None if p is None else p.array
 
 def get_kingpin_angle(step: Dict) -> float:
     """Front-elevation angle of the steering axis from vertical.
     Positive when the axis leans inward at the top."""
-    lbj = np.asarray(step["lbj"], float)
-    ubj = np.asarray(step["ubj"], float)
-    axis_up = ubj - lbj
-    return -np.rad2deg(np.arctan2(axis_up[1], axis_up[2]))
+    up = Point(step["ubj"]) - Point(step["lbj"])
+    return float(-np.rad2deg(np.arctan2(up.y, up.z)))
 
 def get_caster_trail(step: Dict) -> float:
-    """Side-elevation X distance, at wheel-centre height, between the steering
-    axis and the wheel centre. Positive when the axis is forward of the wheel."""
-    wc = np.asarray(step["wc"], float)
-    p = _steering_axis_point_at_z(step, wc[2])
-    if p is None:
-        return 0.0
-    return float(p[0] - wc[0])
+    """Side-elevation X distance, at wheel-center height, between the steering
+    axis and the wheel center. Positive when the axis is forward of the wheel."""
+    wc = Point(step["wc"])
+    p = _steering_axis_point_at_z(step, wc.z)
+    return 0.0 if p is None else float(p[0] - wc.x)
 
 def get_caster_offset(step: Dict, wr: float) -> float:
     """Side-elevation X distance, at ground height, between the steering axis
-    and the tyre contact centre. Positive when the axis is forward of contact."""
-    contact = get_contact_patch(step, wr)
-    p = _steering_axis_point_at_z(step, contact[2])
-    if p is None:
-        return 0.0
-    return float(contact[0] - p[0])
+    and the tire contact center. Positive when the axis is forward of contact."""
+    contact = Point(get_contact_patch(step, wr))
+    p = _steering_axis_point_at_z(step, contact.z)
+    return 0.0 if p is None else float(contact.x - p[0])
 
 def get_kingpin_offset_wheel(step: Dict) -> float:
-    """Front-elevation Y distance, at wheel-centre height, from the wheel
-    centre to the steering axis. Positive when the wheel is outboard."""
-    wc = np.asarray(step["wc"], float)
-    p = _steering_axis_point_at_z(step, wc[2])
-    if p is None:
-        return 0.0
-    return float(wc[1] - p[1])
+    """Front-elevation Y distance, at wheel-center height, from the wheel
+    center to the steering axis. Positive when the wheel is outboard."""
+    wc = Point(step["wc"])
+    p = _steering_axis_point_at_z(step, wc.z)
+    return 0.0 if p is None else float(wc.y - p[1])
 
 def get_kingpin_offset_ground(step: Dict, wr: float) -> float:
     """Front-elevation Y distance, at ground height, between the steering axis
-    and the tyre contact centre. Positive when contact is outboard of the axis."""
-    contact = get_contact_patch(step, wr)
-    p = _steering_axis_point_at_z(step, contact[2])
-    if p is None:
-        return 0.0
-    return float(contact[1] - p[1])
+    and the tire contact center. Positive when contact is outboard of the axis."""
+    contact = Point(get_contact_patch(step, wr))
+    p = _steering_axis_point_at_z(step, contact.z)
+    return 0.0 if p is None else float(contact.y - p[1])
 
 def get_mechanical_trail(step: Dict, wr: float) -> float:
-    """Side-elevation perpendicular distance between the steering axis and the
-    tyre contact centre."""
-    lbj = np.asarray(step["lbj"], float)
-    ubj = np.asarray(step["ubj"], float)
-    contact = get_contact_patch(step, wr)
-    axis_side = np.array([ubj[0] - lbj[0], ubj[2] - lbj[2]])
-    n = np.linalg.norm(axis_side)
-    if n < 1e-9:
+    """Side-elevation (X-Z) perpendicular distance between the steering axis and
+    the tire contact center."""
+    lbj, ubj = Point(step["lbj"]), Point(step["ubj"])
+    contact = Point(get_contact_patch(step, wr))
+    try:
+        axis_xz = Line.from_points(Point(lbj.x, 0.0, lbj.z), Point(ubj.x, 0.0, ubj.z))
+    except ValueError:
         return 0.0
-    axis_side /= n
-    v = np.array([contact[0] - lbj[0], contact[2] - lbj[2]])
-    perp = v - np.dot(v, axis_side) * axis_side
-    return float(np.linalg.norm(perp))
+    return axis_xz.distance_to_point(Point(contact.x, 0.0, contact.z))
 
-def _line_intersect_2d(p1, d1, p2, d2):
-    """Intersection of two 2D lines given as point+direction. Returns None if parallel."""
-    A = np.array([[d1[0], -d2[0]], [d1[1], -d2[1]]])
-    b = p2 - p1
-    det = np.linalg.det(A)
-    if abs(det) < 1e-9:
-        return None
-    t = np.linalg.solve(A, b)[0]
-    return p1 + t * d1
-
-def _contact_patch_perp_yz(step: Dict, step_plus: Dict, step_minus: Dict, wr: float):
-    """Point + direction (Y-Z) of the line through the contact patch, perpendicular to
-    its own path tangent under a small +/- bump_z perturbation. This is the Lotus Shark
-    roll-centre construction: 'a small bump step... allows a perpendicular plane to be
-    constructed to this path at the current contact point.' Returns (None, None) if any
-    of the three steps failed to solve, or the path has no in-plane motion."""
+def _contact_patch_perp_line(step: Dict, step_plus: Dict, step_minus: Dict, wr: float) -> Line | None:
+    """Line through the contact patch, lying in the X=0 plane, perpendicular to
+    the contact patch's own Y-Z path tangent under a small +/- bump perturbation.
+    The Lotus Shark roll-center construction. None if a step failed or the path
+    has no in-plane motion."""
     if not step or not step_plus or not step_minus:
-        return None, None
-    cp, cp_p, cp_m = (get_contact_patch(s, wr)[1:] for s in (step, step_plus, step_minus))
-    tangent = cp_p - cp_m
-    if np.linalg.norm(tangent) < 1e-9:
-        return None, None
-    return cp, np.array([-tangent[1], tangent[0]])
+        return None
+    cp = Point(get_contact_patch(step, wr))
+    cp_p = Point(get_contact_patch(step_plus, wr))
+    cp_m = Point(get_contact_patch(step_minus, wr))
+    tangent = Point(0.0, cp_p.y - cp_m.y, cp_p.z - cp_m.z)
+    if tangent.norm < 1e-9:
+        return None
+    perp = Point(0.0, -tangent.z, tangent.y)   # 90 deg rotation in the Y-Z plane
+    try:
+        return Line(Point(0.0, cp.y, cp.z), perp)
+    except ValueError:
+        return None
 
 def roll_center_yz(step_l: Dict, step_l_plus: Dict, step_l_minus: Dict,
                     step_r: Dict, step_r_plus: Dict, step_r_minus: Dict, wr: float):
-    """Roll centre: intersection of each side's contact-patch perpendicular-to-path
-    line (see _contact_patch_perp_yz). 'the intersection of this plane with... the
-    other side's plane (roll)'. Returns [y, z] or None if unavailable."""
-    p_l, d_l = _contact_patch_perp_yz(step_l, step_l_plus, step_l_minus, wr)
-    p_r, d_r = _contact_patch_perp_yz(step_r, step_r_plus, step_r_minus, wr)
-    if p_l is None or p_r is None:
+    """Roll center: intersection of each side's contact-patch perpendicular-to-path
+    line (see _contact_patch_perp_line). Returns [y, z] or None if unavailable."""
+    line_l = _contact_patch_perp_line(step_l, step_l_plus, step_l_minus, wr)
+    line_r = _contact_patch_perp_line(step_r, step_r_plus, step_r_minus, wr)
+    if line_l is None or line_r is None:
         return None
-    return _line_intersect_2d(p_l, d_l, p_r, d_r)
+    p = line_l.intersection(line_r)
+    return None if p is None else np.array([p.y, p.z])
 
 def contact_patch_z_series(steps: list, wr: float) -> np.ndarray:
-    """Tyre contact-centre height across a sequence of steps. NaN for any failed-solve step."""
+    """Tire contact-center height across a sequence of steps. NaN for any failed-solve step."""
     if not wr:
         return np.array([s["wc"][2] if s else np.nan for s in steps], dtype=float)
     return np.array([get_contact_patch(s, wr)[2] for s in steps], dtype=float)
 
 def motion_ratio_series(steps: list, wr: float = 0.0) -> np.ndarray:
     """Instantaneous Motion Ratio per the Lotus definition: the ratio of change
-    in vertical height of the tyre contact centre to change in spring/shock
+    in vertical height of the tire contact center to change in spring/shock
     length (unsigned; >1 when the wheel moves more than the spring).
     MR = |d(contact_patch_z)/d(shock_length)|. Computed as a true finite-
     difference derivative w.r.t. shock length (not index), which is robust to
@@ -226,68 +176,10 @@ def get_steering_axis_geometry(step: Dict, wr: float) -> Dict[str, float]:
         "mechanical_trail":   get_mechanical_trail(step, wr),
     }
 
-def align_y_to_direction(direction: np.ndarray) -> tuple[float, float, float]:
-    """Euler angles (xyz) that rotate the +Y axis onto unit vector `direction`.
-    Used to orient any Y-aligned primitive (cylinder, wheel disc) along an
-    arbitrary 3-D direction (a link axis, a wheel spin axis, ...)."""
-    d = np.asarray(direction, float)
-    n = np.linalg.norm(d)
-    d = d / n if n > 1e-9 else np.array([0., 1., 0.])
-    Y = np.array([0., 1., 0.])
-    dot = float(np.clip(np.dot(Y, d), -1.0, 1.0))
-    if dot >= 0.9999:
-        return 0.0, 0.0, 0.0
-    if dot <= -0.9999:
-        return np.pi, 0.0, 0.0
-    ax = np.cross(Y, d)
-    ax /= np.linalg.norm(ax)
-    rx, ry, rz = _Rot.from_rotvec(ax * np.arccos(dot)).as_euler('xyz')
-    return float(rx), float(ry), float(rz)
-
-def shock_body_end(s_ib: np.ndarray, s_ob: np.ndarray, shock_min_mm: float) -> np.ndarray:
-    """Outboard end of the (fixed-length) shock body, given the current shock
-    inboard/outboard mount points and the body's static length."""
-    s_ib = np.asarray(s_ib, float)
-    s_ob = np.asarray(s_ob, float)
-    d = s_ob - s_ib
-    L = float(np.linalg.norm(d))
-    if L < 1e-9:
-        return s_ib + np.array([0.0, float(shock_min_mm), 0.0])
-    return s_ib + float(shock_min_mm) * (d / L)
-
-def axle_plunge_point(piv_ib: np.ndarray, piv_ob: np.ndarray, plunge_mm: float) -> np.ndarray:
-    """Offset the inboard axle (CV plunge joint) point along the shaft axis by
-    the current plunge amount, so it visually slides relative to the fixed
-    chassis mount."""
-    piv_ib = np.asarray(piv_ib, float)
-    piv_ob = np.asarray(piv_ob, float)
-    d = piv_ob - piv_ib
-    L = float(np.linalg.norm(d))
-    if L < 1e-9:
-        return piv_ib
-    return piv_ib + (d / L) * float(plunge_mm)
-
-def dash_segments(center: np.ndarray, axis: np.ndarray, length_mm: float,
-                   n_dashes: int = 14) -> list[tuple[np.ndarray, np.ndarray]]:
-    """(p1, p2) endpoint pairs for a dashed reference line of total `length_mm`,
-    centered on `center` and running along `axis`."""
-    center = np.asarray(center, float)
-    axis   = np.asarray(axis, float)
-    n = np.linalg.norm(axis)
-    axis = axis / n if n > 1e-9 else np.array([0., 1., 0.])
-    half = float(length_mm) / 2.0
-    step_len = float(length_mm) / (2 * n_dashes - 1)
-    segments = []
-    for i in range(n_dashes):
-        t0 = -half + i * 2 * step_len
-        t1 = t0 + step_len
-        segments.append((center + axis * t0, center + axis * t1))
-    return segments
-
 def _bump_z_for_corner(z_wu: float, z_cog: float, phi: float, theta: float,
                         wc_stat: np.ndarray, cog_static: np.ndarray) -> float:
     """Vertical suspension travel input for the corner's kinematic solver: the
-    wheel-centre world z minus where it would sit if rigidly attached to the
+    wheel-center world z minus where it would sit if rigidly attached to the
     body at its static offset, given the body's current heave/roll/pitch."""
     dx_m = (wc_stat[0] - cog_static[0]) * 0.001
     dy_m = (wc_stat[1] - cog_static[1]) * 0.001
@@ -331,9 +223,9 @@ def _apply_body_transform(step: Dict, cog_static: np.ndarray, cog_world: np.ndar
     return out
 
 def calculate_ackermann_percentage(
-    inner_toe: float, 
-    outer_toe: float, 
-    track_width: float, 
+    inner_toe: float,
+    outer_toe: float,
+    track_width: float,
     wheelbase: float
 ) -> float:
 
@@ -342,14 +234,14 @@ def calculate_ackermann_percentage(
 
     # Calculate centerline angle - this is the "requested steer angle"
     avg_angle = (theta_3 + theta_4) / 2.0
-    
+
     # Calculate ideal angles based on centerline
     # cot(angle) = 1/tan(angle)
     cot_center = 1.0 / np.tan(np.deg2rad(avg_angle))
-    
+
     # Half-width ratio for geometry calc
     hw_ratio = (track_width / 2.0) / wheelbase
-    
+
     # Handle ideal inner angle
     if (cot_center - hw_ratio) == 0:
         theta_1 = 90.0
