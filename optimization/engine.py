@@ -15,6 +15,7 @@ from models.vehicle import Vehicle
 from simulations.scenarios.kin.front_steer import FrontSteerScenario
 from simulations.scenarios.kin.sweep import SuspensionSweep
 from simulations.scenarios.kin.full_vehicle import FullVehicleScenario, FULL_VEHICLE_TYPES
+from utils.config import OptConfig, SweepConfig
 from utils.misc import log_to_file
 
 class SuspensionProblem(ElementwiseProblem):
@@ -43,9 +44,7 @@ class SuspensionProblem(ElementwiseProblem):
             s_type = obj.get_scenario_type()
 
             if s_type not in results_by_scenario:
-                run_config = self.opt.config.copy()
-                run_config["SIMULATION"] = s_type
-                scenario = self.opt.build_scenario(s_type, vehicle, run_config)
+                scenario = self.opt.build_scenario(s_type, vehicle)
                 try:
                     results_by_scenario[s_type] = scenario.run()
                 except Exception as e:
@@ -74,13 +73,15 @@ class SuspensionProblem(ElementwiseProblem):
 
 class SuspensionOptimizer:
     def __init__(
-        self, 
+        self,
         base_hp_data: Dict[str, Any],
-        config: Dict,
-        objectives: List
+        sweep: SweepConfig,
+        opt: OptConfig,
+        objectives: List,
     ):
         self.base_hp_data = base_hp_data
-        self.config = config
+        self.sweep = sweep
+        self.opt = opt
         self.nickname = list(base_hp_data.keys())[0]
         self.objectives = objectives
 
@@ -101,32 +102,25 @@ class SuspensionOptimizer:
         """
         Reads opt_config to find which points to optimize and sets up the mapping.
         """
-        if "FREE_POINTS" not in self.config:
+        if not self.opt.free_points:
             return
 
-        half = 'front'
-        if self.config.get("HALF") == 'rear':
-            half = 'rear'
-
+        half = "rear" if self.sweep.half == "rear" else "front"
         section_data = self.base_hp_data[self.nickname].get(half, {})
-        for pt_name, axes_limits in self.config["FREE_POINTS"].items():
+
+        for pt_name, box in self.opt.free_points.items():
             if pt_name not in section_data:
                 print(f"WARNING: Point '{pt_name}' not found in '{half}' hardpoints. Skipping.")
                 continue
 
             current_xyz = section_data[pt_name]
-            axis_map = {'x': 0, 'y': 1, 'z': 2}
-
-            for axis_char, axis_idx in axis_map.items():
-                if axis_char in axes_limits:
-                    limits = axes_limits[axis_char]
-                    if limits[0] != limits[1]:
-                        current_val = float(current_xyz[axis_idx])
-                        self.x0.append(current_val)
-                        lower_bound = current_val + limits[0]
-                        upper_bound = current_val + limits[1]
-                        self.bounds.append((lower_bound, upper_bound))
-                        self.points_map.append((half, pt_name, axis_idx))
+            for axis_char, axis_idx in (("x", 0), ("y", 1), ("z", 2)):
+                limits = getattr(box, axis_char)
+                if limits is not None and limits[0] != limits[1]:
+                    current_val = float(current_xyz[axis_idx])
+                    self.x0.append(current_val)
+                    self.bounds.append((current_val + limits[0], current_val + limits[1]))
+                    self.points_map.append((half, pt_name, axis_idx))
 
     def create_vehicle_from_ref(self, x: np.ndarray) -> Vehicle:
         """
@@ -144,16 +138,17 @@ class SuspensionOptimizer:
             inner[section][pt_name][axis_idx] = float(val)
         return Vehicle({self.nickname: inner})
 
-    def build_scenario(self, key: str, vehicle: Vehicle, run_config: Dict):
+    def build_scenario(self, key: str, vehicle: Vehicle):
         """Instantiate the scenario a given key maps to, ready to .run()."""
+        sweep = self.sweep.model_copy(update={"simulation": key})
         if key in ['steer', 'travel', 'droop_steer', 'jounce_steer',
                    'left_travel', 'right_travel', 'sweep_space']:
-            return SuspensionSweep(vehicle, run_config)
+            return SuspensionSweep(vehicle, sweep)
         if key == 'front_steer':
-            return FrontSteerScenario(vehicle, run_config)
+            return FrontSteerScenario(vehicle, sweep)
         if key in FULL_VEHICLE_TYPES:
             need_rc = any("roll_center" in getattr(o, "metric", "") for o in self.objectives)
-            return FullVehicleScenario(vehicle, run_config, mode=key, roll_center=need_rc)
+            return FullVehicleScenario(vehicle, sweep, mode=key, roll_center=need_rc)
         raise ValueError(f"Unknown scenario type: {key}")
 
     def run(self):
@@ -164,10 +159,10 @@ class SuspensionOptimizer:
         num_vars = len(self.x0)
         num_objs = len(self.objectives)
         
-        pop_size = self.config.get("POP_SIZE", 40)
-        n_offsprings = self.config.get("N_OFFSPRINGS", 10)
-        prob = self.config.get("M_PROB", 1.0)
-        eta = self.config.get("M_ETA", 15)
+        pop_size = self.opt.pop_size
+        n_offsprings = self.opt.n_offsprings
+        prob = self.opt.m_prob
+        eta = self.opt.m_eta
         
         print(f"Optimizing {num_vars} variables for {num_objs} objectives.")
         print(f"Population: {pop_size} | Offspring/Gen: {n_offsprings}")
@@ -190,7 +185,7 @@ class SuspensionOptimizer:
             eliminate_duplicates=True
         )
 
-        termination = get_termination("n_gen", self.config.get("MAX_GEN", 50))
+        termination = get_termination("n_gen", self.opt.max_gen)
 
         t0 = time.time()
         res = minimize(

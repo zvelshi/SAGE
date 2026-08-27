@@ -292,12 +292,13 @@ def load_dyn_run_data(run_dir: str) -> dict:
     payload["steps"] = _restore_arrays(payload["steps"])
     return payload
 
-def export_opt_run_data(run_dir: str, res, optimizer, cfg: dict, hardpoints_name: str) -> None:
+def export_opt_run_data(run_dir: str, res, optimizer, hardpoints_name: str) -> None:
     payload = {
         "mode": "opt",
         "sim_type": "run",
         "hardpoints_name": hardpoints_name,
-        "cfg": _json_safe(cfg),
+        "sweep": optimizer.sweep.model_dump(by_alias=True),
+        "opt": optimizer.opt.model_dump(by_alias=True),
         "obj_names": [o.name for o in optimizer.objectives],
         "res_X": _json_safe(res.X) if res.X is not None else None,
         "res_F": _json_safe(res.F) if res.F is not None else None,

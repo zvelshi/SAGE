@@ -6,6 +6,16 @@ from itertools import combinations
 import numpy as np
 
 # ours
+from utils.config import (
+    CollisionSpec,
+    LimitSpec,
+    ObjectiveSpecT,
+    OptConfig,
+    TargetConstSpec,
+    TargetCurveSpec,
+    TargetRangeSpec,
+    TargetZeroSpec,
+)
 from utils.geometry import (
     get_toe_angle,
     get_camber_angle,
@@ -20,38 +30,30 @@ from utils.spatial import Segment
 # Optimizer objectives
 # ===========================================================================
 #
-# Every entry in opt_config.yml's OBJECTIVES list is a mapping with a `type:`
-# selecting one of the classes below and carrying that objective's parameters.
-# There are no bare class names and no hard-coded objectives -- everything the
-# optimizer minimizes is spelled out in the config.
+# Objectives are built from validated `*Spec` models (see utils.config) -- one
+# per entry in opt_config.yml's OBJECTIVES list. The spec already guarantees the
+# fields are present and well-formed, so these classes just do the maths.
 #
 #   type: target_curve   track a metric to an arbitrary piecewise-linear curve
 #   type: target_range   ... to a line between the two sweep endpoints
 #   type: target_const   ... to a flat line at a constant
 #   type: target_zero    ... to a flat line at 0
+#   type: limit          keep sweep statistics of a metric inside bands
 #   type: collision      penalize keepout-zone interference across a sweep
-#
-# The four target_* classes form an inheritance chain (each a narrower special
-# case of the one before): TargetCurve <- TargetRange / TargetConstant <- TargetZero.
+
 
 class OptimizationObjective(ABC):
-    """Base class. `spec` is the raw mapping from the OBJECTIVES list; `config`
-    is the full merged run config (only needed by objectives that read shared
-    top-level sections, e.g. `collision`)."""
+    """`spec` is the validated model from the OBJECTIVES list; `opt` is the full
+    OptConfig (only `collision` needs it, for the shared zone/group sections)."""
 
-    def __init__(self, spec: dict, config: dict = None):
-        self.spec = spec or {}
-        self.config = config or {}
-        self.scenario = self.spec.get("scenario", self.default_scenario())
-        if not self.scenario:
-            raise ValueError(f"objective {self.spec!r} is missing required field 'scenario'")
-        self.name = self.spec.get("name", self.default_name())
+    def __init__(self, spec, opt: OptConfig | None = None):
+        self.spec = spec
+        self.opt = opt
+        self.scenario: str = spec.scenario
+        self.name: str = spec.name or self._default_name()
 
-    def default_scenario(self) -> "str | None":
-        return None
-
-    def default_name(self) -> str:
-        return self.__class__.__name__
+    def _default_name(self) -> str:
+        return getattr(self.spec, "metric", None) or self.__class__.__name__
 
     def get_scenario_type(self) -> str:
         return self.scenario
@@ -62,27 +64,12 @@ class OptimizationObjective(ABC):
 
 
 # ---------------------------------------------------------------------------
-# Generic target-tracking objectives
+# Metric resolution
 # ---------------------------------------------------------------------------
-#
-# All of them run `scenario`, read `metric` at every swept step, and cost how
-# far the metric drifts from a target curve:
-#
-#     cost = aggregate(metric(step) - target(x)) / cost_scale
-#
-# where `x` is the scenario's own sweep variable. A failed/NaN step yields the
-# large 1e2 infeasibility penalty.
-#
-# Shared spec fields:
-#   name        label for logs / Pareto plots            (default: the metric)
-#   metric      see METRIC_RESOLVERS, or any scalar key present on a step
-#   scenario    scenario type to run ('travel', 'front_steer', ...)
-#   cost_scale  divisor on the aggregated error -- the error magnitude that
-#               should read as a cost of 1.0             (default: 1.0)
-#   aggregate   rmse | mean_abs | max_abs | max_abs_plus_range  (default: rmse)
 
 # Scenario-step keys that hold the sweep's independent variable, in priority order.
 SCENARIO_X_KEYS = ("x_val", "input")
+
 
 def _axle_plunge_mm(step: dict) -> float:
     v = (step.get("axle_data") or {}).get("plunge_mm")
@@ -102,9 +89,9 @@ def _ground_clearance_mm(step: dict) -> float:
     return float(min(vals)) if vals else float("nan")
 
 
-# Named metrics that need a helper to compute. Anything not listed here is read
-# as a plain scalar key off the step dict (e.g. 'ackermann_pct', 'track_change_mm'),
-# with dotted names ('axle_data.plunge_mm') walking into nested dicts.
+# Named metrics that need a helper. Anything not listed here is read as a plain
+# scalar key off the step dict, with dotted names ('axle_data.plunge_mm') walking
+# into nested dicts.
 METRIC_RESOLVERS = {
     "toe_deg": get_toe_angle,
     "camber_deg": get_camber_angle,
@@ -151,40 +138,34 @@ def _resolve_metric(metric: str, step: dict) -> float:
     return float(node)
 
 
+# ---------------------------------------------------------------------------
+# Target-tracking objectives
+# ---------------------------------------------------------------------------
+#
+# Run `scenario`, read `metric` at every swept step, cost how far the metric
+# drifts from a target curve:  aggregate(metric(step) - target(x)) / cost_scale
+# where `x` is the scenario's own sweep variable. A failed/NaN step -> 1e2.
+
 class TargetCurve(OptimizationObjective):
-    """`type: target_curve` -- track `metric` to an arbitrary piecewise-linear
-    curve given as `points: [[x, y], ...]` (x = scenario sweep variable)."""
+    """`type: target_curve` -- track `metric` to the piecewise-linear curve
+    through `points` (x = scenario sweep variable)."""
 
-    def __init__(self, spec: dict, config: dict = None):
-        super().__init__(spec, config)
-        try:
-            self.metric = spec["metric"]
-        except KeyError as e:
-            raise ValueError(f"objective '{self.name}' is missing required field {e}") from e
-        self.cost_scale = float(spec.get("cost_scale", 1.0))
-        self.aggregate = spec.get("aggregate", "rmse")
-        if self.aggregate not in AGGREGATES:
-            raise ValueError(
-                f"objective '{self.name}': unknown aggregate '{self.aggregate}' "
-                f"(options: {sorted(AGGREGATES)})"
-            )
-        self._static_points = self._parse_points(spec.get("points"))
-
-    def default_name(self):
-        return self.spec.get("metric", self.__class__.__name__)
+    def __init__(self, spec: TargetCurveSpec, opt: OptConfig | None = None):
+        super().__init__(spec, opt)
+        self.metric = spec.metric
+        self.cost_scale = spec.cost_scale
+        self.aggregate = spec.aggregate
+        pts = getattr(spec, "points", None)
+        self._static_points = self._parse_points(pts) if pts else None
 
     @staticmethod
     def _parse_points(points):
-        if not points:
-            return None
         arr = np.array([[float(x), float(y)] for x, y in points], dtype=float)
         return arr[np.argsort(arr[:, 0])]
 
     def _target_curve(self, xs: np.ndarray):
         """(x_knots, y_knots) for np.interp. Subclasses that derive the knots
         from the swept x-range override this."""
-        if self._static_points is None:
-            raise ValueError(f"objective '{self.name}': type target_curve requires 'points'")
         return self._static_points[:, 0], self._static_points[:, 1]
 
     def calculate_cost(self, results):
@@ -198,16 +179,13 @@ class TargetCurve(OptimizationObjective):
 
 
 class TargetRange(TargetCurve):
-    """`type: target_range` -- two-knot case: `min` / `max` are the desired
-    metric values at the scenario's minimum and maximum swept input."""
+    """`type: target_range` -- `min` / `max` are the desired metric values at the
+    scenario's minimum and maximum swept input."""
 
-    def __init__(self, spec: dict, config: dict = None):
-        super().__init__(spec, config)
-        try:
-            self.y_lo = float(spec["min"])
-            self.y_hi = float(spec["max"])
-        except KeyError as e:
-            raise ValueError(f"objective '{self.name}': type target_range requires {e}") from e
+    def __init__(self, spec: TargetRangeSpec, opt: OptConfig | None = None):
+        super().__init__(spec, opt)
+        self.y_lo = spec.min
+        self.y_hi = spec.max
 
     def _target_curve(self, xs):
         return np.array([np.min(xs), np.max(xs)]), np.array([self.y_lo, self.y_hi])
@@ -216,12 +194,9 @@ class TargetRange(TargetCurve):
 class TargetConstant(TargetCurve):
     """`type: target_const` -- hold `metric` at a single `const` across the sweep."""
 
-    def __init__(self, spec: dict, config: dict = None):
-        super().__init__(spec, config)
-        try:
-            self.const = float(spec["const"])
-        except KeyError as e:
-            raise ValueError(f"objective '{self.name}': type target_const requires {e}") from e
+    def __init__(self, spec: TargetConstSpec, opt: OptConfig | None = None):
+        super().__init__(spec, opt)
+        self.const = getattr(spec, "const", 0.0)
 
     def _target_curve(self, xs):
         return np.array([0.0, 1.0]), np.array([self.const, self.const])
@@ -231,141 +206,20 @@ class TargetZero(TargetConstant):
     """`type: target_zero` -- hold `metric` at 0 across the sweep. The common
     case: bump steer, Ackermann error, track change, scrub, etc."""
 
-    def __init__(self, spec: dict, config: dict = None):
-        super().__init__({**(spec or {}), "const": 0.0}, config)
-
-
-# ---------------------------------------------------------------------------
-# Collision objective
-# ---------------------------------------------------------------------------
-
-class CollisionObjective(OptimizationObjective):
-    """
-    `type: collision` -- keepout-zone interference penalty. Each zone in the
-    top-level KEEPOUT_ZONES defines a shape (cylinder or box) extruded along the
-    axis between two named hardpoints. Cost is the mean penetration between every
-    checked pair of zones across the sweep.
-
-    If the top-level COLLISION_GROUPS is set (group name -> list of zone names),
-    zones in the SAME group are allowed to overlap each other (their pair is
-    exempt). Every other pair is checked. Without COLLISION_GROUPS every pair is
-    checked (needs >= 2 zones). A group may hold at most MAX_GROUP_SIZE zones;
-    members past that cap lose the exemption.
-
-    Spec fields:
-      name       label                              (default: "collision")
-      scenario   sweep to check over                (default: "droop_steer")
-    """
-    MAX_GROUP_SIZE = 10
-
-    def default_scenario(self):
-        return "droop_steer"
-
-    def default_name(self):
-        return "collision"
-
-    def __init__(self, spec: dict, config: dict = None):
-        super().__init__(spec, config)
-        self.zones = self.config.get("KEEPOUT_ZONES", []) or []
-        self.groups = self.config.get("COLLISION_GROUPS", None)
-        self._pairs = self._build_pairs()
-        if not self._pairs:
-            print(f"WARNING: collision objective '{self.name}' has no collidable zone pairs "
-                  f"(zones={len(self.zones)}, groups={'set' if self.groups else 'unset'}). "
-                  f"Cost will always be 0.")
-
-    def _build_pairs(self):
-        if not self.groups:
-            return list(combinations(self.zones, 2))
-
-        zones_by_name = {z.get("name"): z for z in self.zones}
-        exempt_group = {}  # zone name -> group name, only for zones within the size cap
-        for group_name, members in self.groups.items():
-            valid_members = []
-            for member in members:
-                if member not in zones_by_name:
-                    print(f"WARNING: COLLISION_GROUPS['{group_name}'] references "
-                          f"unknown zone '{member}'.")
-                    continue
-                valid_members.append(member)
-            if len(valid_members) > self.MAX_GROUP_SIZE:
-                print(f"WARNING: COLLISION_GROUPS['{group_name}'] has {len(valid_members)} zones, "
-                      f"exceeding the max of {self.MAX_GROUP_SIZE}. Only the first "
-                      f"{self.MAX_GROUP_SIZE} are exempt from collision with each other; "
-                      f"the rest will be checked normally.")
-                valid_members = valid_members[:self.MAX_GROUP_SIZE]
-            for member in valid_members:
-                exempt_group[member] = group_name
-
-        pairs = []
-        for za, zb in combinations(self.zones, 2):
-            ga = exempt_group.get(za.get("name"))
-            gb = exempt_group.get(zb.get("name"))
-            if ga is not None and ga == gb:
-                continue  # same group -> allowed to overlap, skip
-            pairs.append((za, zb))
-        return pairs
-
-    @staticmethod
-    def _zone_radius(zone: dict) -> float:
-        if zone.get("shape") == "box":
-            dim1 = float(zone.get("dim1", 0.0))
-            dim2 = float(zone.get("dim2", 0.0))
-            return 0.5 * float(np.hypot(dim1, dim2))
-        return float(zone.get("dim1", 0.0))
-
-    @staticmethod
-    def _resolve_point(name: str, step: dict) -> np.ndarray:
-        return np.asarray(step[name], dtype=float)
-
-    def calculate_cost(self, results):
-        if not self._pairs:
-            return 0.0
-
-        total_violation = 0.0
-        for step in results:
-            try:
-                endpoints = {
-                    id(z): (self._resolve_point(z["point_a"], step),
-                            self._resolve_point(z["point_b"], step))
-                    for z in self.zones
-                }
-            except KeyError as e:
-                raise KeyError(f"KEEPOUT_ZONES point {e} not found in scenario step output") from e
-
-            for za, zb in self._pairs:
-                pa1, pa2 = endpoints[id(za)]
-                pb1, pb2 = endpoints[id(zb)]
-                d = Segment(pa1, pa2).distance_to_segment(Segment(pb1, pb2))
-                r_sum = self._zone_radius(za) + self._zone_radius(zb)
-                total_violation += max(0.0, r_sum - d)
-
-        return total_violation / len(results)
-
 
 # ---------------------------------------------------------------------------
 # Limit objective
 # ---------------------------------------------------------------------------
 #
-# Rather than tracking a metric to a target, this keeps chosen statistics of a
-# metric across the sweep inside bands, and costs only the spill-out:
+# Keeps chosen statistics of a metric across the sweep inside bands, costing
+# only the spill-out:
 #
 #     violation = sum over (stat, band) of
 #                   max(0, band.min - stat(series)) + max(0, stat(series) - band.max)
 #     cost      = aggregate(all violations) / cost_scale
 #
-# `bounds` maps a stat -> {min?, max?}. Stats:
-#   value    every swept step, each penalized on its own
-#   max | min | mean | range | abs_max     one scalar summarising the sweep
-#
-# Examples:
-#   plunge stays within +-15 mm      -> bounds: {value:   {min: -15, max: 15}}
-#   peak axle angle below 30 deg     -> bounds: {abs_max: {max: 30}}
-#   clearance peak >= 406.4, dip >= 76.2
-#                                    -> bounds: {max: {min: 406.4}, min: {min: 76.2}}
-#
-# Spec fields: name, metric, scenario, bounds, cost_scale (default 1.0),
-# aggregate (default max_abs -- the worst violation). NaN/failed step -> 1e2.
+# `bounds` maps a stat -> {min?, max?}. Stats: value (per step) | max | min |
+# mean | range | abs_max. NaN/failed step -> 1e2.
 
 STAT_REDUCERS = {
     "value": lambda a: a,
@@ -381,43 +235,12 @@ class MetricLimit(OptimizationObjective):
     """`type: limit` -- keep the `bounds` statistics of `metric` inside their
     bands, costing only the excursion outside."""
 
-    def __init__(self, spec: dict, config: dict = None):
-        super().__init__(spec, config)
-        try:
-            self.metric = spec["metric"]
-        except KeyError as e:
-            raise ValueError(f"objective '{self.name}' is missing required field {e}") from e
-        self.cost_scale = float(spec.get("cost_scale", 1.0))
-        self.aggregate = spec.get("aggregate", "max_abs")
-        if self.aggregate not in AGGREGATES:
-            raise ValueError(
-                f"objective '{self.name}': unknown aggregate '{self.aggregate}' "
-                f"(options: {sorted(AGGREGATES)})"
-            )
-        self.constraints = self._parse_bounds(spec.get("bounds"))
-
-    def _parse_bounds(self, raw):
-        """`bounds` (stat -> {min?, max?}) into a list of (stat, lo, hi)."""
-        if not raw:
-            raise ValueError(f"objective '{self.name}': type limit needs a 'bounds' mapping")
-        out = []
-        for stat, band in raw.items():
-            if stat not in STAT_REDUCERS:
-                raise ValueError(
-                    f"objective '{self.name}': unknown stat '{stat}' (options: {sorted(STAT_REDUCERS)})"
-                )
-            band = band or {}
-            lo = None if band.get("min") is None else float(band["min"])
-            hi = None if band.get("max") is None else float(band["max"])
-            if lo is None and hi is None:
-                raise ValueError(f"objective '{self.name}': stat '{stat}' needs a 'min' and/or 'max'")
-            if lo is not None and hi is not None and lo > hi:
-                raise ValueError(f"objective '{self.name}': stat '{stat}' min ({lo}) is above max ({hi})")
-            out.append((stat, lo, hi))
-        return out
-
-    def default_name(self):
-        return self.spec.get("metric", self.__class__.__name__)
+    def __init__(self, spec: LimitSpec, opt: OptConfig | None = None):
+        super().__init__(spec, opt)
+        self.metric = spec.metric
+        self.cost_scale = spec.cost_scale
+        self.aggregate = spec.aggregate
+        self.constraints = [(stat, band.min, band.max) for stat, band in spec.bounds.items()]
 
     def calculate_cost(self, results):
         vals = np.array([_resolve_metric(self.metric, s) for s in results], dtype=float)
@@ -436,32 +259,97 @@ class MetricLimit(OptimizationObjective):
 
 
 # ---------------------------------------------------------------------------
+# Collision objective
+# ---------------------------------------------------------------------------
+
+class CollisionObjective(OptimizationObjective):
+    """
+    `type: collision` -- keepout-zone interference penalty. Each zone in the
+    top-level KEEPOUT_ZONES is a shape (cylinder or box) extruded along the axis
+    between two named hardpoints; cost is the mean penetration between every
+    checked pair of zones across the sweep.
+
+    Zones in the same COLLISION_GROUPS group are allowed to overlap (that pair is
+    exempt); every other pair is checked. The schema guarantees groups only
+    reference real zones and stay within the size cap.
+    """
+
+    def _default_name(self) -> str:
+        return "collision"
+
+    def __init__(self, spec: CollisionSpec, opt: OptConfig | None = None):
+        super().__init__(spec, opt)
+        self.zones = list(opt.keepout_zones) if opt else []
+        self.groups = (opt.collision_groups if opt else None)
+        self._pairs = self._build_pairs()
+        if not self._pairs:
+            print(f"WARNING: collision objective '{self.name}' has no collidable zone pairs "
+                  f"(zones={len(self.zones)}, groups={'set' if self.groups else 'unset'}). "
+                  f"Cost will always be 0.")
+
+    def _build_pairs(self):
+        if not self.groups:
+            return list(combinations(self.zones, 2))
+        member_group = {m: g for g, members in self.groups.items() for m in members}
+        return [
+            (za, zb) for za, zb in combinations(self.zones, 2)
+            if member_group.get(za.name) is None
+            or member_group.get(za.name) != member_group.get(zb.name)
+        ]
+
+    @staticmethod
+    def _zone_radius(zone) -> float:
+        if zone.shape == "box":
+            return 0.5 * float(np.hypot(zone.dim1, zone.dim2 or zone.dim1))
+        return float(zone.dim1)
+
+    @staticmethod
+    def _resolve_point(name: str, step: dict) -> np.ndarray:
+        return np.asarray(step[name], dtype=float)
+
+    def calculate_cost(self, results):
+        if not self._pairs:
+            return 0.0
+
+        total_violation = 0.0
+        for step in results:
+            try:
+                endpoints = {
+                    id(z): (self._resolve_point(z.point_a, step),
+                            self._resolve_point(z.point_b, step))
+                    for z in self.zones
+                }
+            except KeyError as e:
+                raise KeyError(f"KEEPOUT_ZONES point {e} not found in scenario step output") from e
+
+            for za, zb in self._pairs:
+                pa1, pa2 = endpoints[id(za)]
+                pb1, pb2 = endpoints[id(zb)]
+                d = Segment(pa1, pa2).distance_to_segment(Segment(pb1, pb2))
+                r_sum = self._zone_radius(za) + self._zone_radius(zb)
+                total_violation += max(0.0, r_sum - d)
+
+        return total_violation / len(results)
+
+
+# ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
 
-OBJECTIVE_TYPES = {
-    "target_curve": TargetCurve,
-    "target_range": TargetRange,
-    "target_const": TargetConstant,
-    "target_zero": TargetZero,
-    "limit": MetricLimit,
-    "collision": CollisionObjective,
+_OBJECTIVE_FOR_SPEC = {
+    TargetCurveSpec: TargetCurve,
+    TargetRangeSpec: TargetRange,
+    TargetConstSpec: TargetConstant,
+    TargetZeroSpec: TargetZero,
+    LimitSpec: MetricLimit,
+    CollisionSpec: CollisionObjective,
 }
 
 
-def build_objective(spec: dict, config: dict = None) -> OptimizationObjective:
-    if not isinstance(spec, dict):
-        raise TypeError(
-            f"each OBJECTIVES entry must be a mapping with a 'type:', got {type(spec).__name__}"
-        )
-    kind = spec.get("type")
-    if kind not in OBJECTIVE_TYPES:
-        raise ValueError(
-            f"OBJECTIVES entry {spec!r} needs a 'type' in {sorted(OBJECTIVE_TYPES)}"
-        )
-    return OBJECTIVE_TYPES[kind](spec, config)
+def objective_from_spec(spec: ObjectiveSpecT, opt: OptConfig | None = None) -> OptimizationObjective:
+    return _OBJECTIVE_FOR_SPEC[type(spec)](spec, opt)
 
 
-def build_objectives(config: dict) -> list:
-    """Build every objective from the merged run config's OBJECTIVES list."""
-    return [build_objective(spec, config) for spec in config.get("OBJECTIVES", [])]
+def build_objectives(opt: OptConfig) -> list[OptimizationObjective]:
+    """Build every objective from a validated OptConfig's OBJECTIVES list."""
+    return [objective_from_spec(spec, opt) for spec in opt.objectives]

@@ -9,6 +9,7 @@ import numpy as np
 
 # ours
 from simulations.scenarios.base import Scenario
+from utils.config import DynConfig
 from utils.misc import log_to_file
 from utils.dynamics import (
     derivatives, euler_step, solve_all_corners, build_step_dict, initial_shock_lengths,
@@ -35,13 +36,13 @@ class StaticDrop(Scenario):
     Phase 2 (drop):  Body released; car falls, contacts ground, and settles.
     """
 
-    def __init__(self, vehicle, config: Dict, on_progress: Callable | None = None):
+    def __init__(self, vehicle, config: DynConfig, on_progress: Callable | None = None):
         self.vehicle = vehicle
-        self.sol_dt = float(config["SOL_DT"])
-        self.viz_dt = float(config["VIZ_DT"])
-        self.hoist_height_mm = float(config["HOIST_HEIGHT"]) * 1000.0
-        self.hoist_duration  = float(config["HOIST_DURATION"])
-        self.max_sim_time = float(config.get("MAX_SIM_TIME", 60.0))
+        self.sol_dt = config.sol_dt
+        self.viz_dt = config.viz_dt
+        self.hoist_height_mm = config.hoist_height * 1000.0
+        self.hoist_duration = config.hoist_duration
+        self.max_sim_time = config.max_sim_time
         self._on_progress = on_progress if on_progress is not None else _noop_progress
 
     def _progress(self, fraction: float, message: str) -> None:

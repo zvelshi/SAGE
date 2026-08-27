@@ -67,10 +67,6 @@ class Vehicle:
                     f"(1in below inboard lower-A-arm point {lowest_inboard!r})")
         return plane
 
-    def run_simulation(self, simulation_class, **kwargs):
-        simulation = simulation_class(self, kwargs.get("config", {}))
-        return simulation.run()
-
     def get_corner_from_id(self, id) -> 'Corner':
         if id == [0, 0]: return self.front_left
         if id == [1, 0]: return self.front_right

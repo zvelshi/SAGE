@@ -4,10 +4,11 @@ from typing import List, Dict, Any
 # ours
 from simulations.scenarios.base import Scenario
 from simulations.solvers import SingleCornerSolver
+from utils.config import SweepConfig
 from utils.misc import log_to_file, pack_points_nicely
 
 class ExtremePoints(Scenario):
-    def __init__(self, vehicle, config):
+    def __init__(self, vehicle, config: SweepConfig):
         self.config = config
         self.vehicle = vehicle
 
@@ -17,8 +18,8 @@ class ExtremePoints(Scenario):
         raw_pkg = {}
         corners = [[0, 0], [1, 0], [0, 1], [1, 1]]
         
-        steer_min = self.config.get("STEER", {}).get("MIN", -40)
-        steer_max = self.config.get("STEER", {}).get("MAX", 40)
+        steer_min = self.config.steer.min
+        steer_max = self.config.steer.max
         
         steers = {
             "neutral": 0,

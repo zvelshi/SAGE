@@ -8,6 +8,7 @@ import numpy as np
 # ours
 from simulations.scenarios.base import Scenario
 from simulations.solvers import SingleCornerSolver
+from utils.config import SweepConfig
 from utils.geometry import roll_center_yz, get_contact_patch
 from utils.spatial import Point, Line, Plane
 from utils.misc import log_to_file
@@ -26,7 +27,7 @@ class FullVehicleScenario(Scenario):
     actually travels across TRAVEL.MIN..MAX, so it stays in the same ballpark as the
     other kin scenarios' travel range."""
 
-    def __init__(self, vehicle, config, mode: str, roll_center: bool = True):
+    def __init__(self, vehicle, config: SweepConfig, mode: str, roll_center: bool = True):
         self.config = config
         self.mode = mode
         self.vehicle = vehicle
@@ -45,7 +46,7 @@ class FullVehicleScenario(Scenario):
         self.static_rear_track  = abs(rl_hp.wc[1] - rr_hp.wc[1])
         self.static_wheelbase = (fl_hp.wc[0] + fr_hp.wc[0]) / 2.0 - (rl_hp.wc[0] + rr_hp.wc[0]) / 2.0
 
-        tmin, tmax = config['TRAVEL']['MIN'], config['TRAVEL']['MAX']
+        tmin, tmax = config.travel.min, config.travel.max
         at_min = self.fl_solver.solve(steer_mm=0.0, travel_mm=tmin)
         at_max = self.fl_solver.solve(steer_mm=0.0, travel_mm=tmax)
         self.bump_min = (at_min['wc'][2] - fl_hp.wc[2]) if at_min else tmin
@@ -179,8 +180,8 @@ class FullVehicleScenario(Scenario):
         bmin, bmax = self.bump_min, self.bump_max
         # heave sweeps jounce -> droop (all four corners together); roll sweeps
         # droop -> jounce since it's paired against a mirrored opposite-side value
-        travel_vals = (np.linspace(bmax, bmin, self.config['SIM_STEPS']) if self.mode == "heave"
-                        else np.linspace(bmin, bmax, self.config['SIM_STEPS']))
+        travel_vals = (np.linspace(bmax, bmin, self.config.sim_steps) if self.mode == "heave"
+                        else np.linspace(bmin, bmax, self.config.sim_steps))
 
         for b in travel_vals:
             b_mirror = bmin + bmax - b

@@ -7,6 +7,7 @@ import numpy as np
 # ours
 from simulations.scenarios.base import Scenario
 from simulations.solvers import SingleCornerSolver
+from utils.config import SweepConfig
 from utils.misc import log_to_file
 
 class SuspensionSweep(Scenario):
@@ -14,26 +15,27 @@ class SuspensionSweep(Scenario):
     Sweeps a single corner through Travel AND/OR Steer.
     """
 
-    def __init__(self, vehicle, config):
+    def __init__(self, vehicle, config: SweepConfig):
         self.config = config
 
         self.corner_id = [0, 0]
-        if config["HALF"] == 'rear':
+        if config.half == 'rear':
             self.corner_id[1] = 1
-        elif config["SIDE"] == 'right':
+        elif config.side == 'right':
             self.corner_id[0] = 1
 
         self.solver = SingleCornerSolver(vehicle, self.corner_id)
 
     def run(self) -> List[Dict]:
         steps = []
-        count = self.config['SIM_STEPS']
-        
-        # Helper to generate ranges
-        def get_range(key):
-            return np.linspace(self.config[key]['MIN'], self.config[key]['MAX'], count)
+        count = self.config.sim_steps
 
-        sim_type = self.config["SIMULATION"]
+        # Helper to generate ranges ('TRAVEL' / 'STEER')
+        def get_range(key):
+            rng = self.config.travel if key == "TRAVEL" else self.config.steer
+            return np.linspace(rng.min, rng.max, count)
+
+        sim_type = self.config.simulation
         log_to_file(f"Starting SuspensionSweep: {sim_type} on corner {self.corner_id}")
 
         if sim_type == "steer":
@@ -61,7 +63,7 @@ class SuspensionSweep(Scenario):
         elif sim_type == "droop_steer":
             steer_vals = get_range('STEER')
             for s in steer_vals:
-                res = self.solver.solve(steer_mm=s, travel_mm=self.config["TRAVEL"]["MIN"])
+                res = self.solver.solve(steer_mm=s, travel_mm=self.config.travel.min)
                 if res:
                     res['x_val'] = s
                     res['x_label'] = "Rack Travel [mm]"
@@ -72,7 +74,7 @@ class SuspensionSweep(Scenario):
         elif sim_type == "jounce_steer":
             steer_vals = get_range('STEER')
             for s in steer_vals:
-                res = self.solver.solve(steer_mm=s, travel_mm=self.config["TRAVEL"]["MAX"])
+                res = self.solver.solve(steer_mm=s, travel_mm=self.config.travel.max)
                 if res:
                     res['x_val'] = s
                     res['x_label'] = "Rack Travel [mm]"
@@ -83,7 +85,7 @@ class SuspensionSweep(Scenario):
         elif sim_type == "left_travel":
             travel_vals = get_range('TRAVEL')
             for t in travel_vals:
-                res = self.solver.solve(steer_mm=self.config["STEER"]["MIN"], travel_mm=t)
+                res = self.solver.solve(steer_mm=self.config.steer.min, travel_mm=t)
                 if res:
                     res['x_val'] = t
                     res['x_label'] = "Shock Travel [mm]"
@@ -94,7 +96,7 @@ class SuspensionSweep(Scenario):
         elif sim_type == "right_travel":
             travel_vals = get_range('TRAVEL')
             for t in travel_vals:
-                res = self.solver.solve(steer_mm=self.config["STEER"]["MAX"], travel_mm=t)
+                res = self.solver.solve(steer_mm=self.config.steer.max, travel_mm=t)
                 if res:
                     res['x_val'] = t
                     res['x_label'] = "Shock Travel [mm]"

@@ -7,6 +7,7 @@ import numpy as np
 # ours
 from simulations.scenarios.base import Scenario
 from simulations.solvers import SingleCornerSolver
+from utils.config import SweepConfig
 from utils.geometry import calculate_ackermann_percentage, get_toe_angle, get_mechanical_trail
 from utils.misc import log_to_file
 
@@ -15,7 +16,7 @@ class FrontSteerScenario(Scenario):
     Simulates both front wheels steering to calculate Ackermann percentage.
     """
 
-    def __init__(self, vehicle, config):
+    def __init__(self, vehicle, config: SweepConfig):
         self.vehicle = vehicle
         self.config = config
         self.l_solver = SingleCornerSolver(vehicle, corner_id=[0, 0])
@@ -33,9 +34,9 @@ class FrontSteerScenario(Scenario):
         tw = abs(self.vehicle.front_left.hardpoints.wc[1] - self.vehicle.front_right.hardpoints.wc[1])
 
         steer_steps = np.linspace(
-            self.config['STEER']['MIN'],
-            self.config['STEER']['MAX'],
-            self.config['SIM_STEPS']
+            self.config.steer.min,
+            self.config.steer.max,
+            self.config.sim_steps,
         )
 
         for steer in steer_steps:

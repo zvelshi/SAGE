@@ -1,15 +1,15 @@
 """Typed, validated run configuration.
 
 The YAML files under ``config/`` stay the on-disk format; these models are the
-in-memory contract. Load a file with :func:`load_sweep_config` /
+in-memory contract that flows through the runners, the optimizer, the scenarios
+and the objectives. Load a file with :func:`load_sweep_config` /
 :func:`load_opt_config` / :func:`load_dyn_config` -- a bad key, a misspelled
-objective type, ``TRAVEL.MIN > MAX`` etc. now fail immediately with a message
-that names the offending field, instead of silently doing nothing downstream.
+objective type, ``TRAVEL.MIN > MAX`` etc. fail immediately with a message that
+names the offending field, instead of silently doing nothing downstream.
 
-Nothing else in the codebase has to change at once: every model exposes
-``.legacy_dict()`` returning exactly the ``UPPERCASE``-keyed dict the current
-scenario / engine / objective code already consumes, so call sites can be
-migrated one at a time.
+``model_dump(by_alias=True)`` round-trips a model back to its YAML-shaped dict
+(for persisting a run); ``model_copy(update=...)`` makes an edited copy (e.g. the
+optimizer swapping ``simulation`` per objective).
 """
 from __future__ import annotations
 
@@ -45,6 +45,8 @@ OBJECTIVE_SCENARIOS = CORNER_SIM_TYPES + HALF_SIM_TYPES + FULL_SIM_TYPES
 
 AGGREGATES = ("rmse", "mean_abs", "max_abs", "max_abs_plus_range")
 LIMIT_STATS = ("value", "max", "min", "mean", "range", "abs_max")
+
+MAX_COLLISION_GROUP_SIZE = 10
 
 # Named metric helpers (objectives also accept any scalar / dotted step key, so
 # this is advisory only -- an unknown name warns, it does not fail).
@@ -86,9 +88,6 @@ class Range(_Model):
             raise ValueError(f"MIN ({self.min}) must not exceed MAX ({self.max})")
         return self
 
-    def legacy_dict(self) -> dict:
-        return {"MIN": self.min, "MAX": self.max}
-
 
 class AxisBox(_Model):
     """Per-axis search offsets for one free hardpoint: ``[lo, hi]`` millimetres
@@ -107,10 +106,6 @@ class AxisBox(_Model):
                 raise ValueError(f"{name}: lo ({v[0]}) must not exceed hi ({v[1]})")
         return self
 
-    def legacy_dict(self) -> dict:
-        return {k: list(v) for k, v in
-                (("x", self.x), ("y", self.y), ("z", self.z)) if v is not None}
-
 
 class KeepoutZone(_Model):
     name: str
@@ -125,9 +120,6 @@ class KeepoutZone(_Model):
         if self.shape == "box" and self.dim2 is None:
             raise ValueError("shape 'box' requires dim2")
         return self
-
-    def legacy_dict(self) -> dict:
-        return self.model_dump(exclude_none=True)
 
 
 # ---------------------------------------------------------------------------
@@ -145,9 +137,6 @@ class _ObjBase(_Model):
         if v not in OBJECTIVE_SCENARIOS:
             raise ValueError(f"unknown scenario '{v}' (options: {', '.join(OBJECTIVE_SCENARIOS)})")
         return v
-
-    def legacy_dict(self) -> dict:
-        return self.model_dump(exclude_none=True)
 
 
 class _MetricObjBase(_ObjBase):
@@ -210,13 +199,11 @@ class CollisionSpec(_ObjBase):
     scenario: str = "droop_steer"
 
 
-ObjectiveSpec = Annotated[
-    Union[
-        TargetCurveSpec, TargetRangeSpec, TargetConstSpec, TargetZeroSpec,
-        LimitSpec, CollisionSpec,
-    ],
-    Field(discriminator="type"),
+ObjectiveSpecT = Union[
+    TargetCurveSpec, TargetRangeSpec, TargetConstSpec, TargetZeroSpec,
+    LimitSpec, CollisionSpec,
 ]
+ObjectiveSpec = Annotated[ObjectiveSpecT, Field(discriminator="type")]
 
 
 # ---------------------------------------------------------------------------
@@ -240,17 +227,6 @@ class SweepConfig(_Model):
             raise ValueError(f"unknown SIMULATION '{v}' (options: {', '.join(KIN_SIM_TYPES)})")
         return v
 
-    def legacy_dict(self) -> dict:
-        return {
-            "HARDPOINTS": self.hardpoints,
-            "SIM_STEPS": self.sim_steps,
-            "SIMULATION": self.simulation,
-            "HALF": self.half,
-            "SIDE": self.side,
-            "TRAVEL": self.travel.legacy_dict(),
-            "STEER": self.steer.legacy_dict(),
-        }
-
 
 class OptConfig(_Model):
     """``config/opt_config.yml``"""
@@ -263,8 +239,6 @@ class OptConfig(_Model):
     free_points: dict[str, AxisBox] = Field(alias="FREE_POINTS", default_factory=dict)
     keepout_zones: list[KeepoutZone] = Field(alias="KEEPOUT_ZONES", default_factory=list)
     collision_groups: dict[str, list[str]] | None = Field(alias="COLLISION_GROUPS", default=None)
-
-    _MAX_GROUP_SIZE = 10
 
     @model_validator(mode="after")
     def _cross_checks(self):
@@ -284,29 +258,14 @@ class OptConfig(_Model):
                         raise ValueError(
                             f"COLLISION_GROUPS.{group} references unknown zone '{m}'"
                         )
-                if len(members) > self._MAX_GROUP_SIZE:
+                if len(members) > MAX_COLLISION_GROUP_SIZE:
                     raise ValueError(
                         f"COLLISION_GROUPS.{group} has {len(members)} zones "
-                        f"(max {self._MAX_GROUP_SIZE})"
+                        f"(max {MAX_COLLISION_GROUP_SIZE})"
                     )
         if any(o.type == "collision" for o in self.objectives) and len(self.keepout_zones) < 2:
             raise ValueError("a 'collision' objective needs at least 2 KEEPOUT_ZONES")
         return self
-
-    def legacy_dict(self) -> dict:
-        d: dict[str, Any] = {
-            "POP_SIZE": self.pop_size,
-            "N_OFFSPRINGS": self.n_offsprings,
-            "MAX_GEN": self.max_gen,
-            "M_PROB": self.m_prob,
-            "M_ETA": self.m_eta,
-            "OBJECTIVES": [o.legacy_dict() for o in self.objectives],
-            "FREE_POINTS": {k: v.legacy_dict() for k, v in self.free_points.items()},
-            "KEEPOUT_ZONES": [z.legacy_dict() for z in self.keepout_zones],
-        }
-        if self.collision_groups is not None:
-            d["COLLISION_GROUPS"] = self.collision_groups
-        return d
 
 
 class DynConfig(_Model):
@@ -319,15 +278,6 @@ class DynConfig(_Model):
     max_sim_time: float = Field(alias="MAX_SIM_TIME", default=60.0, gt=0.0)
     dyno_stroke: float = Field(alias="DYNO_STROKE", default=50.0, gt=0.0)   # mm
     dyno_frequency: float = Field(alias="DYNO_FREQUENCY", default=1.63, gt=0.0)  # Hz
-
-    def legacy_dict(self) -> dict:
-        return {
-            "SIMULATION": self.simulation,
-            "SOL_DT": self.sol_dt, "VIZ_DT": self.viz_dt,
-            "HOIST_DURATION": self.hoist_duration, "HOIST_HEIGHT": self.hoist_height,
-            "MAX_SIM_TIME": self.max_sim_time,
-            "DYNO_STROKE": self.dyno_stroke, "DYNO_FREQUENCY": self.dyno_frequency,
-        }
 
 
 # ---------------------------------------------------------------------------

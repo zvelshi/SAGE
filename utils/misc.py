@@ -158,7 +158,7 @@ def export_static_hardpoints(vehicle, settled_step, hardpoints_name, run_dir):
     log_to_file(f"Exported settled hardpoints to: {export_path}")
     return export_path
 
-def export_extreme_points_to_xlsx(results, run_dir, config, template_path="example.xlsx"):
+def export_extreme_points_to_xlsx(results, run_dir, sweep, template_path="example.xlsx"):
     log_to_file("-> Generating Extreme Points XLSX Export...")
     
     if not os.path.exists(template_path):
@@ -170,8 +170,8 @@ def export_extreme_points_to_xlsx(results, run_dir, config, template_path="examp
     header_row_0 = df_template.iloc[0].fillna("").tolist() 
     header_row_1 = df_template.iloc[1].fillna("").tolist() 
 
-    steer_min = config.get("STEER", {}).get("MIN", -40)
-    steer_max = config.get("STEER", {}).get("MAX", 40)
+    steer_min = sweep.steer.min
+    steer_max = sweep.steer.max
     
     row_targets = [
         ("Static",         "static", "0_steer"),
@@ -215,7 +215,7 @@ def export_extreme_points_to_xlsx(results, run_dir, config, template_path="examp
         'Inboard_CV_Center':               ('rear', 'piv_ib')
     }
 
-    hp_name = config.get("HARDPOINTS", "UNKNOWN")
+    hp_name = sweep.hardpoints
     date_str = datetime.datetime.now().strftime("%Y%m%d")
     output_data = [header_row_0, header_row_1]
 

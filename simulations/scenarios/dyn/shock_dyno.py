@@ -6,6 +6,7 @@ import numpy as np
 
 # ours
 from simulations.scenarios.base import Scenario
+from utils.config import DynConfig
 from utils.misc import log_to_file
 
 class ShockDyno(Scenario):
@@ -14,14 +15,16 @@ class ShockDyno(Scenario):
     Applies a sinusoidal displacement to an isolated shock absorber to generate Force-Velocity data.
     """
     
-    def __init__(self, vehicle, config: Dict, on_progress: Callable | None = None):
+    def __init__(self, vehicle, config: DynConfig, half: str, side: str,
+                 on_progress: Callable | None = None):
         self.vehicle = vehicle
         self.config = config
-        
-        # Pull parameters from dyn_config
-        self.stroke_mm = float(config["DYNO_STROKE"])
-        self.freq_hz = float(config["DYNO_FREQUENCY"])
-        
+        self.half = half
+        self.side = side
+
+        self.stroke_mm = config.dyno_stroke
+        self.freq_hz = config.dyno_frequency
+
         self._on_progress = on_progress if on_progress else lambda *args: None
 
     def _progress(self, fraction: float, message: str) -> None:
@@ -33,9 +36,7 @@ class ShockDyno(Scenario):
         
         # Get the targeted shock from the vehicle based on KIN config
         # Default to rear right if not specified for some reason
-        half = self.config["HALF"]
-        side = self.config["SIDE"]
-        corner_attr = f"{half}_{side}"
+        corner_attr = f"{self.half}_{self.side}"
         corner = getattr(self.vehicle, corner_attr)
         shock = corner.shock
         

@@ -621,22 +621,21 @@ def main_page():
                 tree.tick(ticked)
                 tree.expand([n["id"] for n in tree_nodes if n["children"]])
 
-    def _corner_for(vehicle, cfg):
-        corner_id = [1 if cfg.get("SIDE") == "right" else 0, 1 if cfg.get("HALF") == "rear" else 0]
+    def _corner_for(vehicle, sweep):
+        corner_id = [1 if sweep.side == "right" else 0, 1 if sweep.half == "rear" else 0]
         return vehicle.get_corner_from_id(corner_id)
 
     def do_preview():
         try:
-            kin_cfg = parse_sweep_config(yaml.safe_load(editors["kin"].value) or {}, "kin config").legacy_dict()
-            opt_cfg = parse_opt_config(yaml.safe_load(editors["opt"].value) or {}, "opt config").legacy_dict()
+            sweep = parse_sweep_config(yaml.safe_load(editors["kin"].value) or {}, "kin config")
+            opt = parse_opt_config(yaml.safe_load(editors["opt"].value) or {}, "opt config")
         except yaml.YAMLError as exc:
             ui.notify(f"YAML error: {exc}", type="negative"); return
         except ConfigError as exc:
             ui.notify(str(exc), type="negative", multi_line=True, timeout=12_000,
                       classes="whitespace-pre-wrap"); return
 
-        hp_name = kin_cfg.get("HARDPOINTS")
-        hp_path = f"config/hardpoints/{hp_name}.yml"
+        hp_path = f"config/hardpoints/{sweep.hardpoints}.yml"
         if not os.path.exists(hp_path):
             ui.notify(f"Hardpoints file not found: {hp_path}", type="negative"); return
 
@@ -647,10 +646,10 @@ def main_page():
         except Exception as exc:
             ui.notify(f"Failed to build vehicle: {exc}", type="negative"); return
 
-        hp = _corner_for(vehicle, kin_cfg).hardpoints
-        free_points_cfg = (opt_cfg or {}).get("FREE_POINTS", {})
-        keepout_cfg = (opt_cfg or {}).get("KEEPOUT_ZONES", [])
-        groups_cfg = (opt_cfg or {}).get("COLLISION_GROUPS")
+        hp = _corner_for(vehicle, sweep).hardpoints
+        free_points_cfg = {k: v.model_dump(exclude_none=True) for k, v in opt.free_points.items()}
+        keepout_cfg = [z.model_dump(exclude_none=True) for z in opt.keepout_zones]
+        groups_cfg = opt.collision_groups
 
         viz_area.clear()
         _reset_display_items()
@@ -701,7 +700,7 @@ def main_page():
         ).classes("text-xs w-full mb-2").props("dense flat")
 
     def _render_kin(result):
-        sim_type, steps, vehicle, cfg, corner_id, run_dir = result
+        sim_type, steps, vehicle, sweep, corner_id, run_dir = result
 
         with viz_area:
             if not steps:
@@ -711,7 +710,7 @@ def main_page():
             cache.update(steps=steps, sim_type=sim_type, vehicle=vehicle, hp=None)
 
             if sim_type == "extreme":
-                _render_extreme(steps, run_dir, cfg); return
+                _render_extreme(steps, run_dir, sweep); return
 
             corner = vehicle.get_corner_from_id(corner_id)
             hp = corner.hardpoints
@@ -813,11 +812,11 @@ def main_page():
             _rebuild_edit_display_dialog()
             _setup_scrubber(len(steps))
 
-    def _render_extreme(data, run_dir, cfg):
+    def _render_extreme(data, run_dir, sweep):
         with viz_area:
             ui.label("Extreme Points Results").classes("font-bold text-base mt-1 text-emerald-800")
-            
-            hp_name = cfg.get("HARDPOINTS", "UNKNOWN")
+
+            hp_name = sweep.hardpoints
             out_file = os.path.abspath(os.path.join(run_dir, f"HARDPOINTS_{hp_name}.xlsx"))
             with ui.row().classes("items-center gap-2 mt-1 mb-2 bg-emerald-50 p-2 rounded w-full"):
                 ui.icon("folder", color="teal")
@@ -853,11 +852,10 @@ def main_page():
     def _render_dyn(result):
         if len(result) == 4:
             steps, vehicle, run_dir, dyn_cfg = result
+            sim_type = dyn_cfg.simulation
         else:
             steps, vehicle, run_dir = result
-            dyn_cfg = {"SIMULATION": "static"}
-
-        sim_type = dyn_cfg.get("SIMULATION", "static")
+            sim_type = "static"
 
         with viz_area:
             if not steps:
@@ -961,10 +959,14 @@ def main_page():
             _setup_scrubber(len(steps))
 
     def _render_opt(result):
-        res, optimizer, cfg, run_dir = result
+        res, optimizer, run_dir = result
         F = res.F
         X = res.X
         obj_names = [o.name for o in optimizer.objectives]
+        sweep = optimizer.sweep
+        zone_dicts = [z.model_dump(exclude_none=True) for z in optimizer.opt.keepout_zones]
+        group_dicts = optimizer.opt.collision_groups
+        free_point_names = list(optimizer.opt.free_points)
 
         with viz_area:
             if F is None:
@@ -1015,22 +1017,21 @@ def main_page():
                             ui.label("drag to rotate · scroll to zoom · right-drag to pan").classes("text-xs text-stone-400 ml-2")
                         with ui.element("div").style("position:relative;width:100%") as scene_wrap:
                             scene3d = ui.scene(width=900, height=460, background_color="#f0f4f8", grid=False).classes("w-full")
-                            _render_legend(cfg.get("KEEPOUT_ZONES", []), cfg.get("COLLISION_GROUPS"))
+                            _render_legend(zone_dicts, group_dicts)
 
                     vehicle = optimizer.create_vehicle_from_ref(X[idx])
-                    hp = _corner_for(vehicle, cfg).hardpoints
-                    scene_objs = _build_config_preview_scene(scene3d, hp, cfg.get("FREE_POINTS", {}),
-                                                             cfg.get("KEEPOUT_ZONES", []), cfg.get("COLLISION_GROUPS"))
+                    hp = _corner_for(vehicle, sweep).hardpoints
+                    fp_dicts = {k: v.model_dump(exclude_none=True) for k, v in optimizer.opt.free_points.items()}
+                    scene_objs = _build_config_preview_scene(scene3d, hp, fp_dicts, zone_dicts, group_dicts)
                     _fit_preview_camera(scene3d, hp)
                     cache["scene_objs"] = scene_objs
                     with scene_wrap:
                         _mount_parts_tree(scene_objs, anchor="left")
 
-                    free_points_cfg = cfg.get("FREE_POINTS", {})
-                    if free_points_cfg:
+                    if free_point_names:
                         ui.label("Free Point Positions").classes("font-bold text-sm text-stone-700 mt-1")
                         rows = []
-                        for pt_name in free_points_cfg:
+                        for pt_name in free_point_names:
                             attr = _resolve_point_attr(hp, pt_name)
                             if attr is None:
                                 continue
