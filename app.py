@@ -23,7 +23,8 @@ from utils.scene3d import (_build_scene, _update_scene, _fit_camera,
                             _resolve_point_attr)
 from utils.plot2d import (_build_kin_figures, _build_front_steer_figures,
                            _build_full_vehicle_figures, _build_opt_figures, _move_vline, _build_dyn_figures,
-                           _build_dyno_figures, _build_sweep_space_figures, rank_solutions)
+                           _build_dyno_figures, _build_sweep_space_figures, rank_solutions,
+                           build_opt_health_figures, opt_health_findings)
 from simulations.scenarios.kin.full_vehicle import FULL_VEHICLE_TYPES
 from models.vehicle import Vehicle
 from utils.logging_setup import add_console_subscriber, remove_console_subscriber, init_logging
@@ -95,6 +96,8 @@ def main_page():
     }
     scrub = {"dirty": False, "idx": 0, "playing": False, "last_t": 0.0}
     dyn_prog = {"fraction": 0.0, "message": ""}
+    opt_prog: dict = {}
+    opt_live: dict = {}      # widget handles for the live optimizer panel
     run_lookup = {}
     compare_state = {"active": False, "run_dir": None}
     display_items: list = []
@@ -393,10 +396,16 @@ def main_page():
                 _refresh_compare_options()
 
             elif mode == "opt":
-                result = await run.io_bound(_run_opt, editors["kin"].value, editors["opt"].value)
-                progress.set_value(0.85)
-                await asyncio.sleep(0)
+                opt_prog.clear()
+                opt_prog.update(fraction=0.0, history=[], done=False)
                 _stop_console()
+                _mount_opt_live()
+                opt_poll_timer.active = True
+                result = await run.io_bound(_run_opt, editors["kin"].value,
+                                            editors["opt"].value, opt_prog)
+                opt_poll_timer.active = False
+                progress.set_value(0.9)
+                await asyncio.sleep(0)
                 viz_area.clear()
                 cache["mode"], cache["last_result"] = "opt", result
                 compare_sel.visible = compare_btn.visible = compare_clear_btn.visible = False
@@ -435,6 +444,8 @@ def main_page():
                 ui.label(traceback.format_exc()).classes("text-red-500 text-xs font-mono whitespace-pre-wrap")
         finally:
             _stop_console()
+            opt_poll_timer.active = False
+            dyn_poll_timer.active = False
             rtask["task"]    = None
             spinner.visible  = False
             progress.visible = False
@@ -495,6 +506,56 @@ def main_page():
             status_lbl.text = dyn_prog["message"]
 
     dyn_poll_timer = ui.timer(0.25, _poll_dyn_progress, active=False)
+
+    def _mount_opt_live():
+        """Live optimizer panel: header stats, worker strip, convergence plots."""
+        viz_area.clear()
+        opt_live.clear()
+        with viz_area:
+            with ui.card().classes("w-full p-3 gap-2"):
+                opt_live["hdr"] = ui.label("Starting optimizer…").classes(
+                    "text-base font-bold text-emerald-800")
+                opt_live["sub"] = ui.label("").classes("text-xs text-stone-500 font-mono")
+                with ui.row().classes("items-center gap-1"):
+                    opt_live["dots"] = ui.row().classes("items-center gap-1")
+                    opt_live["dots_lbl"] = ui.label("").classes("text-xs text-stone-500 ml-1")
+            opt_live["plots"] = ui.column().classes("w-full gap-2")
+
+    def _poll_opt_progress():
+        p = opt_prog
+        if not p:
+            return
+        gen, mx = p.get("gen", 0), p.get("max_gen", 0)
+        n_eval, rate = p.get("n_eval", 0), p.get("rate", 0.0)
+        eta = p.get("eta", 0.0)
+        progress.set_value(p.get("fraction", 0.0))
+        if "hdr" in opt_live:
+            opt_live["hdr"].text = f"Optimizing — generation {gen}/{mx}"
+            eta_txt = f"{int(eta // 60)}m {int(eta % 60):02d}s" if eta else "—"
+            opt_live["sub"].text = (
+                f"{n_eval} designs · {rate:.1f}/s · ETA {eta_txt} · "
+                f"{p.get('feasible_frac', 0) * 100:.0f}% feasible")
+            n_workers = opt_prog.get("n_workers", 1)
+            if not opt_live.get("_dots_built") and n_workers:
+                with opt_live["dots"]:
+                    for _ in range(n_workers):
+                        ui.element("div").classes("opt-worker-dot")
+                opt_live["dots_lbl"].text = f"{n_workers} worker{'s' if n_workers > 1 else ''}"
+                opt_live["_dots_built"] = True
+            hist = p.get("history") or []
+            if hist and len(hist) != opt_live.get("_n_plotted", -1):
+                opt_live["_n_plotted"] = len(hist)
+                opt_live["plots"].clear()
+                with opt_live["plots"]:
+                    for _, fig in build_opt_health_figures(hist, opt_prog.get("obj_names", [])):
+                        ui.plotly(fig).classes("w-full")
+
+    opt_poll_timer = ui.timer(0.4, _poll_opt_progress, active=False)
+    ui.add_css("""
+        .opt-worker-dot { width:9px; height:9px; border-radius:50%; background:#059669;
+                          animation:optpulse 1s ease-in-out infinite; }
+        @keyframes optpulse { 0%,100%{opacity:.35; transform:scale(.8)} 50%{opacity:1; transform:scale(1)} }
+    """)
 
     # live console output shown in viz_area while a run is in progress
     console_state = {"lines": [], "pushed": 0}
@@ -970,7 +1031,7 @@ def main_page():
             if X is not None and X.ndim == 1:
                 X = X.reshape(1, -1)
 
-            mask = np.all(F <= 1e2, axis=1)
+            mask = np.all(F < 1e2, axis=1)
             F = F[mask]
             X = X[mask] if X is not None else None
             if not len(F):
@@ -979,7 +1040,7 @@ def main_page():
             F_all = np.array(optimizer.all_F) if optimizer.all_F else F.copy()
             if F_all.ndim == 1:
                 F_all = F_all.reshape(-1, 1)
-            mask_all = np.all(F_all <= 1e2, axis=1)
+            mask_all = np.all(F_all < 1e2, axis=1)
             F_all = F_all[mask_all] if mask_all.any() else F
 
             ui.label(f"Pareto front — {len(F)} solutions (of {len(F_all)} evaluated)").classes(
@@ -987,6 +1048,29 @@ def main_page():
 
             for _, fig in _build_opt_figures(F_all, F, obj_names):
                 ui.plotly(fig).classes("w-full")
+
+            history = getattr(optimizer, "history", [])
+            if history:
+                findings = opt_health_findings(
+                    history, F, obj_names,
+                    max_gen=optimizer.opt.max_gen,
+                    wall_s=getattr(optimizer, "wall_s", 0.0),
+                    serial_design_s=getattr(optimizer, "serial_design_s", 0.0),
+                    n_workers=getattr(optimizer, "n_workers", 1),
+                    n_eval=len(optimizer.all_F))
+                _warn = any(k == "warn" for k, _ in findings)
+                with ui.expansion("Optimization health", icon="monitor_heart",
+                                  value=_warn).props("dense").classes("w-full"):
+                    _ICON = {"ok": ("check_circle", "text-emerald-600"),
+                             "warn": ("warning", "text-amber-600"),
+                             "info": ("info", "text-stone-500")}
+                    for kind, text in findings:
+                        ic, cls = _ICON[kind]
+                        with ui.row().classes("items-start gap-2 text-sm"):
+                            ui.icon(ic).classes(f"{cls} mt-0.5")
+                            ui.label(text).classes("text-stone-700")
+                    for _, fig in build_opt_health_figures(history, obj_names):
+                        ui.plotly(fig).classes("w-full")
 
             if X is None or not len(X):
                 return

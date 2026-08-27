@@ -306,6 +306,10 @@ def export_opt_run_data(run_dir: str, res, optimizer, hardpoints_name: str) -> N
         "res_F": _json_safe(res.F) if res.F is not None else None,
         "all_X": _json_safe(optimizer.all_X),
         "all_F": _json_safe(optimizer.all_F),
+        "history": _json_safe(getattr(optimizer, "history", [])),
+        "wall_s": getattr(optimizer, "wall_s", 0.0),
+        "serial_design_s": getattr(optimizer, "serial_design_s", 0.0),
+        "n_workers": getattr(optimizer, "n_workers", 1),
     }
     with open(os.path.join(run_dir, _OPT_DATA_JSON), "w") as f:
         json.dump(payload, f, indent=2)

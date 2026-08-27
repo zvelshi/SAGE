@@ -97,7 +97,8 @@ def test_parallel_matches_serial(tiny):
 # --- callback unit ---------------------------------------------------
 
 def test_progress_callback_accumulates():
-    opt = types.SimpleNamespace(all_X=[], all_F=[], history=[], n_obj=2, max_gen=5)
+    opt = types.SimpleNamespace(all_X=[], all_F=[], history=[], n_obj=2, max_gen=5,
+                                n_workers=1, objectives=[])
     cb = _ProgressCallback(opt, {}, total_evals=20)
 
     def gen(n, F):

@@ -738,3 +738,135 @@ def _build_dyn_figures(steps: list[dict[str, Any]], cmp_steps: list[dict[str, An
         ("caster_rear",  _lr_fig("Rear Caster [°]",  "caster", "rl", "rr", _C_REAR)),
         ("toe_rear",     _lr_fig("Rear Toe [°]",     "toe",    "rl", "rr", _C_REAR)),
     ], xs
+
+
+# --------------------------------------------------------------------------- #
+#  Optimizer health / convergence diagnostics                                #
+# --------------------------------------------------------------------------- #
+
+def _health_fig(title, traces, height=240, **layout):
+    f = go.Figure(traces)
+    f.update_layout(**{**_LAYOUT_BASE, "height": height, "title": title,
+                       "showlegend": len(traces) > 1, **layout})
+    return f
+
+
+def build_opt_health_figures(history: list, obj_names: list) -> list:
+    """Per-generation convergence figures from optimizer.history."""
+    if not history:
+        return []
+    gen  = [h["gen"] for h in history]
+    hv   = [h["hv"] for h in history]
+    nnds = [h["n_nds"] for h in history]
+    feas = [100.0 * h["feasible_frac"] for h in history]
+    dt   = [h["dt"] for h in history]
+    best = np.array([h["front_best"] for h in history], dtype=float)   # gens x n_obj
+
+    conv = _health_fig(
+        "Convergence — hypervolume & front size",
+        [
+            go.Scatter(x=gen, y=hv, name="hypervolume", mode="lines+markers",
+                       line=dict(color=_COLORS[0], width=2)),
+            go.Scatter(x=gen, y=nnds, name="front size", mode="lines+markers", yaxis="y2",
+                       line=dict(color=_COLORS[2], width=1.5, dash="dot")),
+        ],
+        xaxis_title="generation",
+        yaxis=dict(title="hypervolume"),
+        yaxis2=dict(title="front size", overlaying="y", side="right", showgrid=False),
+    )
+
+    # per-objective running best, normalised to its own gen-1..last span
+    span = np.ptp(best, axis=0)
+    span[span == 0] = 1.0
+    norm = (best - best.min(axis=0)) / span
+    obj_traces = [
+        go.Scatter(x=gen, y=norm[:, j], name=obj_names[j], mode="lines",
+                   line=dict(color=_COLORS[j % len(_COLORS)], width=1.8))
+        for j in range(best.shape[1])
+    ]
+    objfig = _health_fig("Per-objective best on the front (normalised)", obj_traces,
+                         xaxis_title="generation", yaxis_title="0 = gen-1 best, 1 = final best")
+
+    bars = _health_fig(
+        "Feasible fraction & wall time per generation",
+        [
+            go.Bar(x=gen, y=feas, name="% feasible", marker_color=_COLORS[1]),
+            go.Scatter(x=gen, y=dt, name="sec / gen", mode="lines+markers", yaxis="y2",
+                       line=dict(color="#6b7280", width=1.5)),
+        ],
+        xaxis_title="generation",
+        yaxis=dict(title="% feasible", range=[0, 105]),
+        yaxis2=dict(title="sec / gen", overlaying="y", side="right", showgrid=False),
+    )
+    return [("convergence", conv), ("objectives", objfig), ("feasibility", bars)]
+
+
+def opt_health_findings(history: list, F_front: np.ndarray, obj_names: list, *,
+                        max_gen: int, wall_s: float, serial_design_s: float,
+                        n_workers: int, n_eval: int) -> list:
+    """Short plain-language notes about the run. Returns [(kind, text)] where
+    kind in {"ok", "warn", "info"}."""
+    out: list = []
+
+    # timing / parallel efficiency
+    rate = n_eval / wall_s if wall_s else 0.0
+    est_serial = n_eval * serial_design_s
+    speedup = est_serial / wall_s if wall_s else 1.0
+    out.append(("info",
+                f"{n_eval} designs in {wall_s:.0f}s ({rate:.1f}/s) on {n_workers} "
+                f"worker(s) - about {speedup:.1f}x a single core"))
+    if n_workers > 1 and speedup < 0.6 * n_workers:
+        out.append(("warn",
+                    f"parallel efficiency is low ({speedup:.1f}x on {n_workers} workers) - "
+                    f"N_OFFSPRINGS may be too small to keep every worker busy, or the "
+                    f"per-design cost too uneven"))
+
+    # convergence / stagnation
+    if len(history) >= 3:
+        hv = [h["hv"] for h in history]
+        last_improve = max((i for i in range(1, len(hv))
+                            if hv[i] > hv[i - 1] * (1 + 1e-4)), default=0)
+        stalled = len(history) - 1 - last_improve
+        if hv[-1] > hv[-2] * (1 + 1e-3):
+            out.append(("warn",
+                        f"hypervolume was still climbing at the final generation - "
+                        f"raise MAX_GEN past {max_gen} for a better front"))
+        elif stalled >= max(4, max_gen // 4):
+            out.append(("ok",
+                        f"front converged around generation {history[last_improve]['gen']}; "
+                        f"MAX_GEN could drop to ~{history[last_improve]['gen'] + 3}"))
+        else:
+            out.append(("ok", "front converged near the end of the run"))
+
+    # final front vs everything good found along the way
+    if history and F_front is not None and len(F_front):
+        found = history[-1]["n_nds"]
+        if found > 1.5 * len(F_front):
+            out.append(("warn",
+                        f"the search found {found} non-dominated designs but the final "
+                        f"front keeps only {len(F_front)} - the rest were crowded out; "
+                        f"a larger POP_SIZE would retain more"))
+
+    # feasibility
+    if history:
+        final_feas = history[-1]["feasible_frac"]
+        mean_feas = float(np.mean([h["feasible_frac"] for h in history]))
+        if mean_feas < 0.5:
+            out.append(("warn",
+                        f"only {mean_feas*100:.0f}% of evaluated designs were feasible on "
+                        f"average - constraints/keepout zones may be too tight, or the "
+                        f"FREE_POINTS box too large"))
+        elif final_feas > 0.9:
+            out.append(("ok", f"{final_feas*100:.0f}% of the final generation was feasible"))
+
+    # pinned / inactive objectives
+    if F_front is not None and len(F_front) >= 3:
+        rng = F_front.max(axis=0) - F_front.min(axis=0)
+        scale = np.abs(F_front.mean(axis=0)) + 1e-9
+        for j, name in enumerate(obj_names):
+            if rng[j] / scale[j] < 0.02:
+                out.append(("warn",
+                            f"'{name}' barely varies across the front "
+                            f"(range {rng[j]/scale[j]*100:.1f}% of its mean) - it isn't being "
+                            f"traded off; check its cost_scale or drop it"))
+    return out

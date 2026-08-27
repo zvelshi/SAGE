@@ -158,7 +158,7 @@ def _load_dyn_run(run_dir: str):
     return steps, vehicle, run_dir, dyn
 
 
-def _run_opt(kin_text: str, opt_text: str):
+def _run_opt(kin_text: str, opt_text: str, progress_store: dict | None = None):
     run_dir = new_run_dir("opt")
     # opt runs are millions of solves -- keep the file at INFO unless SAGE_DEBUG.
     file_level = logging.DEBUG if os.environ.get("SAGE_DEBUG") else logging.INFO
@@ -176,7 +176,7 @@ def _run_opt(kin_text: str, opt_text: str):
 
         objectives = opt_objs.build_objectives(opt)
         optimizer = SuspensionOptimizer(_vehicle_config(sweep.hardpoints), sweep, opt, objectives)
-        res = optimizer.run()
+        res = optimizer.run(progress_store)
 
         export_opt_run_data(run_dir, res, optimizer, sweep.hardpoints)
         return res, optimizer, run_dir
@@ -194,6 +194,10 @@ def _load_opt_run(run_dir: str):
     optimizer = SuspensionOptimizer(_vehicle_config(hp_name, run_dir), sweep, opt, objectives)
     optimizer.all_X = [np.array(x, dtype=float) for x in (payload.get("all_X") or [])]
     optimizer.all_F = [np.array(f, dtype=float) for f in (payload.get("all_F") or [])]
+    optimizer.history = payload.get("history") or []
+    optimizer.wall_s = payload.get("wall_s", 0.0)
+    optimizer.serial_design_s = payload.get("serial_design_s", 0.0)
+    optimizer.n_workers = payload.get("n_workers", 1)
 
     res_X = np.array(payload["res_X"], dtype=float) if payload.get("res_X") is not None else None
     res_F = np.array(payload["res_F"], dtype=float) if payload.get("res_F") is not None else None

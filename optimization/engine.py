@@ -15,6 +15,7 @@ from pymoo.operators.mutation.pm import PolynomialMutation
 from pymoo.optimize import minimize
 from pymoo.parallelization import StarmapParallelization
 from pymoo.termination import get_termination
+from pymoo.util.nds.non_dominated_sorting import NonDominatedSorting
 
 # ours
 from models.vehicle import Vehicle
@@ -84,24 +85,37 @@ class _ProgressCallback(Callback):
     record per-generation health metrics, and push a live snapshot to
     ``progress_store`` for the UI."""
 
+    _HV_REF = 1.1  # in normalised objective space
+
     def __init__(self, optimizer, progress_store: dict | None, total_evals: int):
         super().__init__()
         self.opt = optimizer
         self.store = progress_store
         self.total = total_evals
         self.t0 = time.perf_counter()
-        self._ref_point: np.ndarray | None = None
-        self._hv: HV | None = None
         self._last_t = self.t0
+        self._lo: np.ndarray | None = None      # normalisation offset / scale, fixed
+        self._scale: np.ndarray | None = None    # once the first front appears
+        self._hv = HV(ref_point=np.full(optimizer.n_obj, self._HV_REF))
 
-    def _hypervolume(self, front_F: np.ndarray) -> float:
-        if not len(front_F):
+    def _cumulative_front(self) -> np.ndarray:
+        feas = [f for f in self.opt.all_F if np.all(f < INFEASIBLE)]
+        if not feas:
+            return np.empty((0, self.opt.n_obj))
+        F = np.asarray(feas)
+        nd = NonDominatedSorting().do(F, only_non_dominated_front=True)
+        return F[nd]
+
+    def _normalised_hv(self, front: np.ndarray) -> float:
+        if not len(front):
             return 0.0
-        if self._hv is None:
-            self._ref_point = front_F.max(axis=0) * 1.1 + 1e-9
-            self._hv = HV(ref_point=self._ref_point)
-        assert self._ref_point is not None
-        return float(self._hv(np.minimum(front_F, self._ref_point)))
+        if self._scale is None:
+            self._lo = front.min(axis=0)
+            scale = np.ptp(front, axis=0)
+            scale[scale == 0] = 1.0
+            self._scale = scale
+        norm = np.clip((front - self._lo) / self._scale, None, self._HV_REF)
+        return float(self._hv(norm))
 
     def notify(self, algorithm):
         now = time.perf_counter()
@@ -111,16 +125,15 @@ class _ProgressCallback(Callback):
         self.opt.all_F.extend(np.asarray(f, float) for f in F)
 
         gen_feasible = np.all(F < INFEASIBLE, axis=1)
-        opt_F = np.atleast_2d(algorithm.opt.get("F"))
-        front_feasible = opt_F[np.all(opt_F < INFEASIBLE, axis=1)]
+        front = self._cumulative_front()   # best designs seen so far, not just this gen
 
         rec = {
             "gen": int(algorithm.n_gen),
             "n_eval": int(algorithm.evaluator.n_eval),
-            "n_nds": int(len(front_feasible)),
-            "hv": self._hypervolume(front_feasible),
+            "n_nds": int(len(front)),
+            "hv": self._normalised_hv(front),
             "feasible_frac": float(gen_feasible.mean()) if len(gen_feasible) else 0.0,
-            "front_best": front_feasible.min(axis=0).tolist() if len(front_feasible)
+            "front_best": front.min(axis=0).tolist() if len(front)
                           else [float("nan")] * self.opt.n_obj,
             "t": now - self.t0,
             "dt": now - self._last_t,
@@ -141,7 +154,9 @@ class _ProgressCallback(Callback):
                 eta=max(self.total - rec["n_eval"], 0) / max(rate, 1e-6),
                 feasible_frac=rec["feasible_frac"],
                 history=list(self.opt.history),
-                front_F=front_feasible.tolist(),
+                front_F=front.tolist(),
+                obj_names=[o.name for o in self.opt.objectives],
+                n_workers=self.opt.n_workers,
             )
 
 
