@@ -45,14 +45,20 @@ def test_repo_configs_parse():
         load_dyn_config("config/dyn_config.yml")
 
 
-def test_legacy_dict_roundtrips_keys():
-    s = _q(parse_sweep_config, MIN_SWEEP).legacy_dict()
-    assert set(s) == {"HARDPOINTS", "SIM_STEPS", "SIMULATION", "HALF", "SIDE", "TRAVEL", "STEER"}
-    assert s["TRAVEL"] == {"MIN": -30.0, "MAX": 100.0}
+def test_alias_dump_roundtrips():
+    """model_dump(by_alias=True) is what a run persists; it must re-parse."""
+    s = _q(parse_sweep_config, MIN_SWEEP)
+    dumped = s.model_dump(by_alias=True)
+    assert dumped["TRAVEL"] == {"MIN": -30.0, "MAX": 100.0}
+    assert _q(parse_sweep_config, dumped) == s
 
-    o = _q(parse_opt_config, MIN_OPT).legacy_dict()
-    assert o["OBJECTIVES"][0]["type"] == "target_zero"
-    assert o["POP_SIZE"] == 40 and o["N_OFFSPRINGS"] == 10  # defaults
+    o = _q(parse_opt_config, MIN_OPT)
+    assert _q(parse_opt_config, o.model_dump(by_alias=True)) == o
+
+
+def test_model_copy_swaps_simulation():
+    s = _q(parse_sweep_config, MIN_SWEEP)
+    assert s.model_copy(update={"simulation": "heave"}).simulation == "heave"
 
 
 # --- sweep config ----------------------------------------------------------
