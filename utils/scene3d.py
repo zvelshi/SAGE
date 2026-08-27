@@ -142,6 +142,69 @@ def _set_subtree_visible(node, show: bool) -> None:
     for obj in _iter_leaf_objs(node):
         obj.visible(show)
 
+# ----------------------- #
+#  Parts visibility tree  #
+# ----------------------- #
+
+_TREE_LABELS = {
+    "fl": "Front Left", "fr": "Front Right", "rl": "Rear Left", "rr": "Rear Right",
+    "cog": "Center of Gravity", "gc": "Ground Clearance",
+    "upper_arm": "Upper A-Arm", "lower_arm": "Lower A-Arm", "upright": "Upright",
+    "tie_rod": "Tie Rod", "shock": "Coilover", "axle": "Axle", "wheel": "Wheel",
+    "trailing_link": "Trailing Link", "upper_camber_link": "Upper Camber Link",
+    "lower_camber_link": "Lower Camber Link",
+    "tie_guide": "Tie Rod Axis", "axle_guide": "Axle Axis",
+    "ground": "Ground Plane", "chassis": "Chassis Plane", "contacts": "Contact Patches",
+    "low_pt": "Reference Point", "gauge_f": "Front Gauge", "gauge_r": "Rear Gauge",
+}
+
+# Composites that start hidden (their parts-tree node is unticked on load).
+_HIDDEN_BY_DEFAULT = {"gc"}
+
+def _label_for(key: str) -> str:
+    return _TREE_LABELS.get(key, key.replace("_", " ").title())
+
+def _is_branch(val) -> bool:
+    """A dict node is a branch only if it nests further dicts (corners); a dict of
+    plain leaves (one composite) is itself a single toggle."""
+    return isinstance(val, dict) and any(isinstance(v, dict) for v in val.values())
+
+def scene_parts_tree(scene_objs, _prefix: str = "") -> list[dict]:
+    """meshcat-style node list [{id, label, children}] for every togglable part."""
+    nodes = []
+    for key, val in (scene_objs or {}).items():
+        node_id = f"{_prefix}{key}"
+        children = scene_parts_tree(val, f"{node_id}/") if _is_branch(val) else []
+        nodes.append({"id": node_id, "label": _label_for(key), "children": children})
+    return nodes
+
+def _tree_leaf_ids(nodes: list[dict]) -> list[str]:
+    out = []
+    for n in nodes:
+        if n["children"]:
+            out.extend(_tree_leaf_ids(n["children"]))
+        else:
+            out.append(n["id"])
+    return out
+
+def scene_parts_tree_defaults(scene_objs) -> tuple[list[dict], list[str], list[str]]:
+    """(tree, all leaf ids, leaf ids that start ticked/visible)."""
+    tree = scene_parts_tree(scene_objs)
+    leaves = _tree_leaf_ids(tree)
+    ticked = [lid for lid in leaves if lid.split("/")[0] not in _HIDDEN_BY_DEFAULT]
+    return tree, leaves, ticked
+
+def resolve_scene_node(scene_objs, node_id: str):
+    node = scene_objs
+    for part in node_id.split("/"):
+        node = node[part]
+    return node
+
+def set_scene_node_visible(scene_objs, node_id: str, show: bool) -> None:
+    """Show/hide a parts-tree node's whole subtree; hidden objects are skipped by
+    the per-frame ``place`` so the renderer does less work."""
+    _set_subtree_visible(resolve_scene_node(scene_objs, node_id), show)
+
 def _dyno_shock(step) -> Shock:
     """The isolated shock for the dyno, positioned vertically with its inboard
     mount fixed 200mm above the fully-extended length."""
@@ -176,7 +239,7 @@ def _update_dyn_scene(objs: dict, step, vehicle) -> None:
         corner = getattr(vehicle, attr)
         if key in objs and step.get(key) is not None:
             _update_corner_objects(objs[key], step[key], corner.hardpoints)
-    if "cog" in objs and step.get("cog_pos") is not None:
+    if "cog" in objs and step.get("cog_pos") is not None and getattr(objs["cog"], "visible_", True):
         objs["cog"].move(*_v(step["cog_pos"]))
         objs["cog"].material(_cog_color(step.get("phase", "drop")))
     if "gc" in objs and step.get("gc_viz") is not None:

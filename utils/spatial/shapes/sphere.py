@@ -21,6 +21,8 @@ class Sphere:
         return self.place(obj, scale)
 
     def place(self, obj, scale: float = SCENE_SCALE, restyle: bool = False):
+        if not getattr(obj, "visible_", True):
+            return obj  # hidden -> skip the transform RPCs entirely
         obj.move(*xyz(self.center, scale))
         if restyle:
             obj.material(self.color, opacity=self.opacity)

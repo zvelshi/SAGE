@@ -38,6 +38,8 @@ class Cylinder:
         return self.place(obj, scale)
 
     def place(self, obj, scale: float = SCENE_SCALE, restyle: bool = False):
+        if not getattr(obj, "visible_", True):
+            return obj  # hidden -> skip the transform RPCs entirely
         obj.scale(1.0, max(self.length_mm * scale, 1e-9), 1.0)
         obj.move(*xyz(self.midpoint, scale))
         obj.rotate(*align_y_to_direction(self.direction.array))

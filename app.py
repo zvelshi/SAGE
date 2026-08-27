@@ -13,6 +13,7 @@ from nicegui import ui, run
 from utils.sim_runners import _run_kin, _run_opt, _run_dyn, _load_kin_run, _load_dyn_run, _load_opt_run
 from utils.export import (list_available_runs, build_kin_static_values, build_dyn_static_values,
                            load_kin_run_data, load_dyn_run_data, NO_COMPARE_SIM_TYPES)
+from utils import scene3d
 from utils.scene3d import (_build_scene, _update_scene, _fit_camera,
                             _build_dyn_scene, _update_dyn_scene, _fit_camera_dyn,
                             _build_shock_dyno_scene, _update_shock_dyno_scene, _fit_camera_shock_dyno,
@@ -584,6 +585,34 @@ def main_page():
                     ui.element("div").style(f"width:10px;height:10px;background:{color};opacity:0.6;border-radius:2px")
                     ui.label(label).classes("text-xs text-stone-600")
 
+    def _mount_parts_tree(scene_objs):
+        """meshcat-style show/hide tree, overlaid top-right of the 3D view. Call
+        inside the scene's position:relative wrapper, after scene_objs is built."""
+        tree_nodes, leaf_ids, ticked = scene3d.scene_parts_tree_defaults(scene_objs)
+        for lid in leaf_ids:
+            scene3d.set_scene_node_visible(scene_objs, lid, lid in ticked)
+        if not tree_nodes:
+            return
+
+        def _apply(ticked_ids):
+            keep = set(ticked_ids)
+            for lid in leaf_ids:
+                scene3d.set_scene_node_visible(cache["scene_objs"], lid, lid in keep)
+
+        with ui.column().classes("bg-white/95 rounded shadow").style(
+            "position:absolute; top:8px; right:8px; z-index:10; width:216px; "
+            "max-height:calc(100% - 16px); overflow:auto"
+        ):
+            with ui.expansion("Parts", icon="account_tree", value=True).props(
+                "dense expand-separator"
+            ).classes("w-full text-xs"):
+                tree = ui.tree(tree_nodes, label_key="label", node_key="id",
+                               tick_strategy="leaf",
+                               on_tick=lambda e: _apply(e.value)) \
+                    .props("dense no-connectors").classes("text-xs")
+                tree.tick(ticked)
+                tree.expand([n["id"] for n in tree_nodes if n["children"]])
+
     def _corner_for(vehicle, cfg):
         corner_id = [1 if cfg.get("SIDE") == "right" else 0, 1 if cfg.get("HALF") == "rear" else 0]
         return vehicle.get_corner_from_id(corner_id)
@@ -641,9 +670,9 @@ def main_page():
             return None
 
     def _render_stat_compare_table(current_pairs, cmp_pairs, cmp_label):
-        cmp_map = dict(cmp_pairs)
+        cmp_map = {p[0]: p[1] for p in cmp_pairs}
         rows = []
-        for label, cur_val in current_pairs:
+        for label, cur_val, *_ in current_pairs:
             cmp_val = cmp_map.get(label, "—")
             cur_num, cmp_num = _parse_num(cur_val), _parse_num(cmp_val)
             delta = f"{cur_num - cmp_num:+.3f}" if cur_num is not None and cmp_num is not None else "—"
@@ -720,10 +749,12 @@ def main_page():
                 _render_stat_compare_table(stat_pairs, cmp_stat_pairs, cmp_label or "Compare")
             elif stat_pairs:
                 with ui.row().classes("w-full gap-2 flex-wrap"):
-                    for label, value in stat_pairs:
+                    for label, value, *rest in stat_pairs:
+                        bad = bool(rest and isinstance(rest[0], dict) and rest[0].get("bad"))
+                        color = "text-red-600" if bad else "text-emerald-700"
                         with ui.card().classes("px-4 py-2") as stat_card:
                             ui.label(label).classes("text-xs text-stone-500")
-                            ui.label(value).classes("text-lg font-semibold text-emerald-700")
+                            ui.label(value).classes(f"text-lg font-semibold {color}")
                         _add_display_item(label, stat_card, default_visible=False, category="value")
 
             # 3D view
@@ -731,7 +762,8 @@ def main_page():
                 with ui.row().classes("items-center px-3 py-1 bg-stone-100 border-b border-stone-200"):
                     ui.label("3D View").classes("text-sm font-semibold text-stone-700")
                     ui.label("drag to rotate · scroll to zoom · right-drag to pan").classes("text-xs text-stone-400 ml-2")
-                scene3d = ui.scene(width=900, height=420,background_color="#f0f4f8", grid=(10, 100)).classes("w-full")
+                with ui.element("div").style("position:relative;width:100%") as scene_wrap:
+                    scene3d = ui.scene(width=900, height=420, background_color="#f0f4f8", grid=(10, 100)).classes("w-full")
             _add_display_item("3D View", card_3d, default_visible=True, category="3d")
 
             # build objects on last valid step (widest extent) for camera fit, then update to step 0
@@ -745,6 +777,8 @@ def main_page():
                 _fit_camera(scene3d, scene_step, hp)
                 _update_scene(scene_objs, steps[0], hp)
             cache["scene_objs"] = scene_objs
+            with scene_wrap:
+                _mount_parts_tree(scene_objs)
 
             # 3D data plots
             if sim_type == "sweep_space":
@@ -877,7 +911,8 @@ def main_page():
 
                     if sim_type != "shock_dyno":
                         ui.label("● hoist  ● drop  ● settled").classes("text-xs text-stone-400 ml-auto")
-                scene3d = ui.scene(width=900, height=500, background_color="#f0f4f8", grid=(10, 100)).classes("w-full")
+                with ui.element("div").style("position:relative;width:100%") as scene_wrap:
+                    scene3d = ui.scene(width=900, height=500, background_color="#f0f4f8", grid=(10, 100)).classes("w-full")
             _add_display_item("3D View", card_3d, default_visible=True, category="3d")
 
             if sim_type == "shock_dyno":
@@ -888,8 +923,10 @@ def main_page():
                 scene_objs = _build_dyn_scene(scene3d, steps[-1], vehicle)
                 _fit_camera_dyn(scene3d, steps[-1], vehicle)
                 _update_dyn_scene(scene_objs, steps[0], vehicle)
-                
+
             cache["scene_objs"] = scene_objs
+            with scene_wrap:
+                _mount_parts_tree(scene_objs)
 
             if sim_type == "shock_dyno":
                 named_figs, xs = _build_dyno_figures(steps, cmp_steps=cmp_steps, cmp_label=cmp_label or "Compare")

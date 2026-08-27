@@ -26,6 +26,8 @@ class Cuboid:
         return self.place(obj, scale)
 
     def place(self, obj, scale: float = SCENE_SCALE, restyle: bool = False):
+        if not getattr(obj, "visible_", True):
+            return obj  # hidden -> skip the transform RPCs entirely
         obj.rotate(*align_y_to_direction(Point(self.normal).unit().array))
         obj.move(*xyz(self.center, scale))
         if restyle:
