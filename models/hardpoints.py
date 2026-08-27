@@ -24,16 +24,17 @@ class Hardpoints:
         """Dynamically returns a list of all defined field names in the dataclass."""
         return [f.name for f in fields(self)]
 
-    def _fill_vehicle_properties(self, data):
-        self.shock_min = data['shock_min']
-        self.shock_max = data['shock_max']
-        self.wr = data['wheel_properties']['radius']
-        self.ww = data['wheel_properties']['width']
-        self.wheel_stiffness = data['wheel_properties']['stiffness']
-        self.wheel_damping   = data['wheel_properties']['damping']
+    def _fill_vehicle_properties(self, config):
+        wp = config.wheel_properties
+        self.shock_min = config.shock_min
+        self.shock_max = config.shock_max
+        self.wr = wp.radius
+        self.ww = wp.width
+        self.wheel_stiffness = wp.stiffness
+        self.wheel_damping = wp.damping
 
     @classmethod
-    def from_data(cls, data: dict) -> Hardpoints:
+    def from_config(cls, corner) -> Hardpoints:
         raise NotImplementedError
 
     @classmethod
@@ -107,10 +108,10 @@ class DoubleAArm(Hardpoints):
     }
 
     @classmethod
-    def from_data(cls, data: dict) -> "DoubleAArm":
+    def from_config(cls, corner) -> "DoubleAArm":
         return cls(
-            **{attr: np.array(data[yaml_key]) for attr, yaml_key in cls._YAML_MAP.items()},
-            s_loc=str(data['shock_location']),
+            **{attr: np.array(getattr(corner, yaml_key)) for attr, yaml_key in cls._YAML_MAP.items()},
+            s_loc=corner.shock_location,
         )
 
     @classmethod
@@ -163,9 +164,9 @@ class SemiTrailingLink(Hardpoints):
     }
 
     @classmethod
-    def from_data(cls, data: dict) -> "SemiTrailingLink":
+    def from_config(cls, corner) -> "SemiTrailingLink":
         return cls(
-            **{attr: np.array(data[yaml_key]) for attr, yaml_key in cls._YAML_MAP.items()}
+            **{attr: np.array(getattr(corner, yaml_key)) for attr, yaml_key in cls._YAML_MAP.items()}
         )
 
     @classmethod

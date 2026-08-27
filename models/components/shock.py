@@ -40,19 +40,16 @@ class Shock:
     bump_stop_k: float = 500.0 # extreme stiffness when bottomed out
 
     @classmethod
-    def from_config(cls, config: dict, shock_max_ref: float, shock_min_ref: float):
-        s_data = config.get('shock_setup', {})
-        # Backwards compatibility: fallback to c_comp/c_rebound if hs/ls aren't specified
-        c_comp = s_data.get('compression_damping', 0.0)
-        c_rebound = s_data.get('rebound_damping', 0.0)
+    def from_config(cls, setup, shock_max_ref: float, shock_min_ref: float):
+        """`setup` is a models.vehicle_config.ShockSetup."""
         return cls(
-            spring=Spring(stiffness=s_data.get('spring_rate', 0.0), preload=s_data.get('preload', 0.0)),
+            spring=Spring(stiffness=setup.spring_rate, preload=setup.preload),
             damper=Damper(
-                ls_comp=s_data.get('ls_comp', c_comp),
-                hs_comp=s_data.get('hs_comp', c_comp),
-                ls_rebound=s_data.get('ls_rebound', c_rebound),
-                hs_rebound=s_data.get('hs_rebound', c_rebound),
-                split_vel=s_data.get('split_vel', 50.0)
+                ls_comp=setup.ls_comp,
+                hs_comp=setup.hs_comp,
+                ls_rebound=setup.ls_rebound,
+                hs_rebound=setup.hs_rebound,
+                split_vel=setup.split_vel,
             ),
             shock_max=shock_max_ref,
             shock_min=shock_min_ref

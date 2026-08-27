@@ -15,6 +15,7 @@ from models.vehicle import Vehicle
 from simulations.scenarios.kin.front_steer import FrontSteerScenario
 from simulations.scenarios.kin.sweep import SuspensionSweep
 from simulations.scenarios.kin.full_vehicle import FullVehicleScenario, FULL_VEHICLE_TYPES
+from models.vehicle_config import VehicleConfig
 from utils.config import OptConfig, SweepConfig
 from utils.misc import log_to_file
 
@@ -74,15 +75,15 @@ class SuspensionProblem(ElementwiseProblem):
 class SuspensionOptimizer:
     def __init__(
         self,
-        base_hp_data: Dict[str, Any],
+        base_vehicle: VehicleConfig,
         sweep: SweepConfig,
         opt: OptConfig,
         objectives: List,
     ):
-        self.base_hp_data = base_hp_data
+        self.base_vehicle = base_vehicle
         self.sweep = sweep
         self.opt = opt
-        self.nickname = list(base_hp_data.keys())[0]
+        self.nickname = base_vehicle.nickname
         self.objectives = objectives
 
         self.bounds = []
@@ -106,14 +107,14 @@ class SuspensionOptimizer:
             return
 
         half = "rear" if self.sweep.half == "rear" else "front"
-        section_data = self.base_hp_data[self.nickname].get(half, {})
+        corner_cfg = getattr(self.base_vehicle, half)
 
         for pt_name, box in self.opt.free_points.items():
-            if pt_name not in section_data:
+            if not hasattr(corner_cfg, pt_name):
                 print(f"WARNING: Point '{pt_name}' not found in '{half}' hardpoints. Skipping.")
                 continue
 
-            current_xyz = section_data[pt_name]
+            current_xyz = getattr(corner_cfg, pt_name)
             for axis_char, axis_idx in (("x", 0), ("y", 1), ("z", 2)):
                 limits = getattr(box, axis_char)
                 if limits is not None and limits[0] != limits[1]:
@@ -125,18 +126,15 @@ class SuspensionOptimizer:
     def create_vehicle_from_ref(self, x: np.ndarray) -> Vehicle:
         """
         Creates a new Vehicle by patching only the free-point coordinates onto a
-        structural copy of the base hardpoint tree. Vehicle() copies every point
-        into its own np.array on build (see Hardpoints.from_data), so the large
-        shared remainder of the tree is never mutated -- no need to deep-copy it.
+        deep copy of the base VehicleConfig (once per design, not per solve).
         """
-        inner = dict(self.base_hp_data[self.nickname])
-        for section in {sec for sec, _, _ in self.points_map}:
-            inner[section] = dict(inner[section])
-        for section, pt_name in {(sec, pt) for sec, pt, _ in self.points_map}:
-            inner[section][pt_name] = list(inner[section][pt_name])
+        vc = self.base_vehicle.model_copy(deep=True)
         for val, (section, pt_name, axis_idx) in zip(x, self.points_map):
-            inner[section][pt_name][axis_idx] = float(val)
-        return Vehicle({self.nickname: inner})
+            corner_cfg = getattr(vc, section)
+            pt = list(getattr(corner_cfg, pt_name))
+            pt[axis_idx] = float(val)
+            setattr(corner_cfg, pt_name, tuple(pt))
+        return Vehicle(vc)
 
     def build_scenario(self, key: str, vehicle: Vehicle):
         """Instantiate the scenario a given key maps to, ready to .run()."""

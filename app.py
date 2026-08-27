@@ -10,7 +10,8 @@ import numpy as np
 from nicegui import ui, run
 
 # ours
-from utils.sim_runners import _run_kin, _run_opt, _run_dyn, _load_kin_run, _load_dyn_run, _load_opt_run
+from utils.sim_runners import (_run_kin, _run_opt, _run_dyn, _load_kin_run, _load_dyn_run,
+                               _load_opt_run, _vehicle_config)
 from utils.config import parse_sweep_config, parse_opt_config, ConfigError
 from utils.export import (list_available_runs, build_kin_static_values, build_dyn_static_values,
                            load_kin_run_data, load_dyn_run_data, NO_COMPARE_SIM_TYPES)
@@ -635,14 +636,11 @@ def main_page():
             ui.notify(str(exc), type="negative", multi_line=True, timeout=12_000,
                       classes="whitespace-pre-wrap"); return
 
-        hp_path = f"config/hardpoints/{sweep.hardpoints}.yml"
-        if not os.path.exists(hp_path):
-            ui.notify(f"Hardpoints file not found: {hp_path}", type="negative"); return
-
         try:
-            with open(hp_path) as f:
-                hp_data = yaml.safe_load(f)
-            vehicle = Vehicle(hp_data)
+            vehicle = Vehicle(_vehicle_config(sweep.hardpoints))
+        except ConfigError as exc:
+            ui.notify(str(exc), type="negative", multi_line=True, timeout=12_000,
+                      classes="whitespace-pre-wrap"); return
         except Exception as exc:
             ui.notify(f"Failed to build vehicle: {exc}", type="negative"); return
 
@@ -724,11 +722,8 @@ def main_page():
                     if cmp_payload["sim_type"] == sim_type:
                         cmp_steps = cmp_payload["steps"]
                         cmp_corner_id = cmp_payload.get("corner_id") or corner_id
-                        cmp_hp_name = cmp_payload.get("hardpoints_name")
-                        cmp_hp_path = os.path.join(compare_state["run_dir"], f"{cmp_hp_name}.yml")
-                        if not os.path.exists(cmp_hp_path):
-                            cmp_hp_path = f"config/hardpoints/{cmp_hp_name}.yml"
-                        cmp_vehicle = Vehicle(yaml.safe_load(open(cmp_hp_path)))
+                        cmp_vehicle = Vehicle(_vehicle_config(
+                            cmp_payload.get("hardpoints_name"), compare_state["run_dir"]))
                         cmp_hp = cmp_vehicle.get_corner_from_id(cmp_corner_id).hardpoints
                         cmp_label = run_lookup.get(compare_state["run_dir"], {}).get(
                             "timestamp", compare_state["run_dir"])
@@ -876,11 +871,8 @@ def main_page():
                     cmp_payload = load_dyn_run_data(compare_state["run_dir"])
                     if cmp_payload["sim_type"] == sim_type:
                         cmp_steps = cmp_payload["steps"]
-                        cmp_hp_name = cmp_payload.get("hardpoints_name")
-                        cmp_hp_path = os.path.join(compare_state["run_dir"], f"{cmp_hp_name}.yml")
-                        if not os.path.exists(cmp_hp_path):
-                            cmp_hp_path = f"config/hardpoints/{cmp_hp_name}.yml"
-                        cmp_vehicle = Vehicle(yaml.safe_load(open(cmp_hp_path)))
+                        cmp_vehicle = Vehicle(_vehicle_config(
+                            cmp_payload.get("hardpoints_name"), compare_state["run_dir"]))
                         cmp_label = run_lookup.get(compare_state["run_dir"], {}).get(
                             "timestamp", compare_state["run_dir"])
                 except Exception as exc:

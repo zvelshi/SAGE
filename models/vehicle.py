@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 # default
-from typing import Dict, Tuple
+from typing import Tuple
 
 # third-party
 import numpy as np
 
 # ours
 from models.hardpoints import DoubleAArm, SemiTrailingLink
+from models.vehicle_config import VehicleConfig
 from models.corners.double_a_arm import DoubleAArmNumeric
 from models.corners.semi_trailing_link import SemiTrailingLinkNumeric
 from models.components.axle import Axle
@@ -20,30 +21,28 @@ from utils.misc import log_to_file
 class Vehicle:
     nickname: str
 
-    def __init__(self, data: Dict = {}):
-        self.nickname = list(data.keys())[0]
-        vehicle_data = data[self.nickname]
-        
-        self.config = vehicle_data 
-        
-        sp = vehicle_data['mass_properties']
-        self.total_sprung_mass = sp['sprung_mass']
-        self.cog = tuple(sp['cog'])
-        self.inertia_matrix = np.array(vehicle_data['mass_properties']['inertia'])
-        
+    def __init__(self, config: VehicleConfig):
+        self.config = config
+        self.nickname = config.nickname
+
+        sp = config.mass_properties
+        self.total_sprung_mass = sp.sprung_mass
+        self.cog = tuple(sp.cog)
+        self.inertia_matrix = np.array(sp.inertia)
+
         # Calculate front bias mathematically from exact CoG X-position
-        f_x = vehicle_data['front']['wheel_center'][0]
-        r_x = vehicle_data['rear']['wheel_center'][0]
+        f_x = config.front.wheel_center[0]
+        r_x = config.rear.wheel_center[0]
         wb = abs(f_x - r_x)
         dist_from_rear = abs(self.cog[0] - r_x)
         self.sprung_bias_f = dist_from_rear / wb
 
-        u_mass = vehicle_data['mass_properties']['unsprung_mass']
-        
-        self.front_left  = Corner(vehicle_data, (0, 0), u_mass['fl'])
-        self.front_right = Corner(vehicle_data, (1, 0), u_mass['fr'])
-        self.rear_left   = Corner(vehicle_data, (0, 1), u_mass['rl'])
-        self.rear_right  = Corner(vehicle_data, (1, 1), u_mass['rr'])
+        u_mass = sp.unsprung_mass
+
+        self.front_left  = Corner(config, (0, 0), u_mass['fl'])
+        self.front_right = Corner(config, (1, 0), u_mass['fr'])
+        self.rear_left   = Corner(config, (0, 1), u_mass['rl'])
+        self.rear_right  = Corner(config, (1, 1), u_mass['rr'])
 
         self.cog_point = Point(self.cog)
         self.chassis_bottom_plane = self._build_chassis_bottom_plane()
@@ -84,21 +83,21 @@ class Corner:
                 |       |
          (0, 1) |_______| (1, 1)
     """
-    def __init__(self, data: Dict, id: Tuple[int, int], unsprung_mass: float):
+    def __init__(self, config: VehicleConfig, id: Tuple[int, int], unsprung_mass: float):
         self.id = id
         self.unsprung_mass = unsprung_mass
 
         if self.id[1] == 0:
-            corner_data = data['front']
-            hp = DoubleAArm.from_data(data=data['front'])
+            corner_cfg = config.front
+            hp = DoubleAArm.from_config(corner_cfg)
         else:
-            corner_data = data['rear']
-            hp = SemiTrailingLink.from_data(data=data['rear'])
+            corner_cfg = config.rear
+            hp = SemiTrailingLink.from_config(corner_cfg)
 
         if self.id[0] == 0:  # left side -> mirror across y-axis
             hp = type(hp).mirror_points(hp)
 
-        hp._fill_vehicle_properties(data=data)
+        hp._fill_vehicle_properties(config)
 
         self.hardpoints = hp
 
@@ -109,5 +108,5 @@ class Corner:
         )
 
         self.solver = DoubleAArmNumeric(hp, axle) if isinstance(hp, DoubleAArm) else SemiTrailingLinkNumeric(hp, axle)
-        self.shock = Shock.from_config(corner_data, data['shock_max'], data['shock_min'])
-        self.wheel = Wheel.from_config(data)
+        self.shock = Shock.from_config(corner_cfg.shock_setup, config.shock_max, config.shock_min)
+        self.wheel = Wheel.from_config(config)

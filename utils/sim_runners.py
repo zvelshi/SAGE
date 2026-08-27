@@ -14,6 +14,7 @@ from utils.config import (
     SweepConfig, DynConfig,
 )
 from models.vehicle import Vehicle
+from models.vehicle_config import load_vehicle_config, VehicleConfig
 from simulations.scenarios.kin.front_steer import FrontSteerScenario
 from simulations.scenarios.kin.full_vehicle import FullVehicleScenario, FULL_VEHICLE_TYPES
 from simulations.scenarios.kin.extremepoints import ExtremePoints
@@ -30,6 +31,15 @@ def _corner_id(sweep: SweepConfig) -> list[int]:
     return [1 if sweep.side == "right" else 0, 1 if sweep.half == "rear" else 0]
 
 
+def _vehicle_config(hp_name: str, run_dir: str | None = None) -> VehicleConfig:
+    """Load a hardpoint file, preferring a copy saved inside `run_dir`."""
+    if run_dir:
+        saved = os.path.join(run_dir, f"{hp_name}.yml")
+        if os.path.exists(saved):
+            return load_vehicle_config(saved)
+    return load_vehicle_config(f"config/hardpoints/{hp_name}.yml")
+
+
 def _run_kin(kin_text: str, sim_type: str):
     run_dir = setup_logging("kin_sim")
     with open(os.path.join(run_dir, "kin_config.yml"), "w") as f:
@@ -39,10 +49,7 @@ def _run_kin(kin_text: str, sim_type: str):
         update={"simulation": sim_type})
 
     save_configs(run_dir, [], sweep.hardpoints)
-
-    with open(f"config/hardpoints/{sweep.hardpoints}.yml") as f:
-        hp_data = yaml.safe_load(f)
-    vehicle = Vehicle(hp_data)
+    vehicle = Vehicle(_vehicle_config(sweep.hardpoints))
 
     if sim_type == "front_steer":
         corner_id = [0, 0]
@@ -69,13 +76,7 @@ def _load_kin_run(run_dir: str):
     previously-saved run, so it can be handed straight to _render_kin() -- no re-simulation."""
     payload = load_kin_run_data(run_dir)
     hp_name = payload.get("hardpoints_name", "unknown")
-
-    hp_path = os.path.join(run_dir, f"{hp_name}.yml")
-    if not os.path.exists(hp_path):
-        hp_path = f"config/hardpoints/{hp_name}.yml"
-    with open(hp_path) as f:
-        hp_data = yaml.safe_load(f)
-    vehicle = Vehicle(hp_data)
+    vehicle = Vehicle(_vehicle_config(hp_name, run_dir))
 
     sim_type = payload["sim_type"]
     kin_cfg_path = os.path.join(run_dir, "kin_config.yml")
@@ -105,10 +106,7 @@ def _run_dyn(kin_text: str, dyn_text: str, sim_type: str, progress_store: dict |
         update={"simulation": sim_type})
 
     save_configs(run_dir, [], sweep.hardpoints)
-
-    with open(f"config/hardpoints/{sweep.hardpoints}.yml") as f:
-        hp_data = yaml.safe_load(f)
-    vehicle = Vehicle(hp_data)
+    vehicle = Vehicle(_vehicle_config(sweep.hardpoints))
 
     def on_progress(fraction: float, message: str) -> None:
         if progress_store is not None:
@@ -138,13 +136,7 @@ def _load_dyn_run(run_dir: str):
     """Same idea as _load_kin_run(), for a saved dyn run -- feeds straight into _render_dyn()."""
     payload = load_dyn_run_data(run_dir)
     hp_name = payload.get("hardpoints_name", "unknown")
-
-    hp_path = os.path.join(run_dir, f"{hp_name}.yml")
-    if not os.path.exists(hp_path):
-        hp_path = f"config/hardpoints/{hp_name}.yml"
-    with open(hp_path) as f:
-        hp_data = yaml.safe_load(f)
-    vehicle = Vehicle(hp_data)
+    vehicle = Vehicle(_vehicle_config(hp_name, run_dir))
 
     sim_type = payload["sim_type"]
     dyn_cfg_path = os.path.join(run_dir, "dyn_config.yml")
@@ -171,10 +163,8 @@ def _run_opt(kin_text: str, opt_text: str):
 
     save_configs(run_dir, [], sweep.hardpoints)
 
-    with open(f"config/hardpoints/{sweep.hardpoints}.yml") as f:
-        hp_data = yaml.safe_load(f)
     objectives = opt_objs.build_objectives(opt)
-    optimizer = SuspensionOptimizer(hp_data, sweep, opt, objectives)
+    optimizer = SuspensionOptimizer(_vehicle_config(sweep.hardpoints), sweep, opt, objectives)
     res = optimizer.run()
 
     export_opt_run_data(run_dir, res, optimizer, sweep.hardpoints)
@@ -188,16 +178,10 @@ def _load_opt_run(run_dir: str):
     payload = load_opt_run_data(run_dir)
     hp_name = payload.get("hardpoints_name", "unknown")
 
-    hp_path = os.path.join(run_dir, f"{hp_name}.yml")
-    if not os.path.exists(hp_path):
-        hp_path = f"config/hardpoints/{hp_name}.yml"
-    with open(hp_path) as f:
-        hp_data = yaml.safe_load(f)
-
     sweep = parse_sweep_config(payload["sweep"], f"{run_dir} (saved sweep)")
     opt = parse_opt_config(payload["opt"], f"{run_dir} (saved opt)")
     objectives = opt_objs.build_objectives(opt)
-    optimizer = SuspensionOptimizer(hp_data, sweep, opt, objectives)
+    optimizer = SuspensionOptimizer(_vehicle_config(hp_name, run_dir), sweep, opt, objectives)
     optimizer.all_X = [np.array(x, dtype=float) for x in (payload.get("all_X") or [])]
     optimizer.all_F = [np.array(f, dtype=float) for f in (payload.get("all_F") or [])]
 

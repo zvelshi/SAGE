@@ -19,11 +19,7 @@ class Wheel:
         return max(0.0, self.stiffness * penetration - self.damping * dz_hub)
 
     @classmethod
-    def from_config(cls, data: dict) -> "Wheel":
-        wp = data["wheel_properties"]
-        return cls(
-            radius=wp["radius"],
-            width=wp["width"],
-            stiffness=wp["stiffness"],
-            damping=wp["damping"],
-        )
+    def from_config(cls, config) -> "Wheel":
+        """`config` is a models.vehicle_config.VehicleConfig."""
+        wp = config.wheel_properties
+        return cls(radius=wp.radius, width=wp.width, stiffness=wp.stiffness, damping=wp.damping)
