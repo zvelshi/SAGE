@@ -585,9 +585,10 @@ def main_page():
                     ui.element("div").style(f"width:10px;height:10px;background:{color};opacity:0.6;border-radius:2px")
                     ui.label(label).classes("text-xs text-stone-600")
 
-    def _mount_parts_tree(scene_objs):
-        """meshcat-style show/hide tree, overlaid top-right of the 3D view. Call
-        inside the scene's position:relative wrapper, after scene_objs is built."""
+    def _mount_parts_tree(scene_objs, anchor: str = "right"):
+        """meshcat-style show/hide tree, overlaid in a top corner of the 3D view
+        (`anchor` = "left" or "right"). Call inside the scene's position:relative
+        wrapper, after scene_objs is built."""
         tree_nodes, leaf_ids, ticked = scene3d.scene_parts_tree_defaults(scene_objs)
         for lid in leaf_ids:
             scene3d.set_scene_node_visible(scene_objs, lid, lid in ticked)
@@ -600,7 +601,7 @@ def main_page():
                 scene3d.set_scene_node_visible(cache["scene_objs"], lid, lid in keep)
 
         with ui.column().classes("bg-white/95 rounded shadow").style(
-            "position:absolute; top:8px; right:8px; z-index:10; width:216px; "
+            f"position:absolute; top:8px; {anchor}:8px; z-index:10; width:216px; "
             "max-height:calc(100% - 16px); overflow:auto"
         ):
             with ui.expansion("Parts", icon="account_tree", value=True).props(
@@ -655,12 +656,15 @@ def main_page():
                 with ui.row().classes("items-center px-3 py-1 bg-stone-100 border-b border-stone-200"):
                     ui.label("3D Preview").classes("text-sm font-semibold text-stone-700")
                     ui.label("drag to rotate · scroll to zoom · right-drag to pan").classes("text-xs text-stone-400 ml-2")
-                with ui.element("div").style("position:relative;width:100%"):
+                with ui.element("div").style("position:relative;width:100%") as scene_wrap:
                     scene3d = ui.scene(width=900, height=460, background_color="#f0f4f8", grid=False).classes("w-full")
                     _render_legend(keepout_cfg, groups_cfg)
 
-        _build_config_preview_scene(scene3d, hp, free_points_cfg, keepout_cfg, groups_cfg)
+        scene_objs = _build_config_preview_scene(scene3d, hp, free_points_cfg, keepout_cfg, groups_cfg)
         _fit_preview_camera(scene3d, hp)
+        cache["scene_objs"] = scene_objs
+        with scene_wrap:
+            _mount_parts_tree(scene_objs, anchor="left")
         status_lbl.text = "Preview ready — configure and press Run to optimize."
 
     def _parse_num(value_str):
@@ -1001,15 +1005,18 @@ def main_page():
                         with ui.row().classes("items-center px-3 py-1 bg-stone-100 border-b border-stone-200"):
                             ui.label("3D View — Selected Solution").classes("text-sm font-semibold text-stone-700")
                             ui.label("drag to rotate · scroll to zoom · right-drag to pan").classes("text-xs text-stone-400 ml-2")
-                        with ui.element("div").style("position:relative;width:100%"):
+                        with ui.element("div").style("position:relative;width:100%") as scene_wrap:
                             scene3d = ui.scene(width=900, height=460, background_color="#f0f4f8", grid=False).classes("w-full")
                             _render_legend(cfg.get("KEEPOUT_ZONES", []), cfg.get("COLLISION_GROUPS"))
 
                     vehicle = optimizer.create_vehicle_from_ref(X[idx])
                     hp = _corner_for(vehicle, cfg).hardpoints
-                    _build_config_preview_scene(scene3d, hp, cfg.get("FREE_POINTS", {}), cfg.get("KEEPOUT_ZONES", []),
-                                                 cfg.get("COLLISION_GROUPS"))
+                    scene_objs = _build_config_preview_scene(scene3d, hp, cfg.get("FREE_POINTS", {}),
+                                                             cfg.get("KEEPOUT_ZONES", []), cfg.get("COLLISION_GROUPS"))
                     _fit_preview_camera(scene3d, hp)
+                    cache["scene_objs"] = scene_objs
+                    with scene_wrap:
+                        _mount_parts_tree(scene_objs, anchor="left")
 
                     free_points_cfg = cfg.get("FREE_POINTS", {})
                     if free_points_cfg:
