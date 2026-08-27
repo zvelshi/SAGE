@@ -102,11 +102,7 @@ class SemiTrailingLinkNumeric:
 
             return r
 
-        sol = least_squares(
-            res,
-            self._x_prev,
-            xtol=1e-9,
-        )
+        sol = least_squares(res, self._x_prev, method="lm", xtol=1e-7, ftol=1e-7, gtol=1e-7)
 
         if not sol.success:
             print(f"Solution failed: {sol.message}")

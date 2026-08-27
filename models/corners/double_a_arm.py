@@ -137,25 +137,11 @@ class DoubleAArmNumeric:
 
             return r
 
-        # Detect side based on Wheel Center Y-coordinate
-        is_right_side = hp.wc[1] < 0
-
-        if is_right_side:
-            # right: X >= 0, Y <= 0
-            lb = np.array([0.0, -np.inf, -np.inf, -np.inf, -np.inf, -np.pi/2])
-            ub = np.array([np.inf, 0.0,   np.inf,  np.inf,  np.inf,  np.pi/2])
-        else:
-            # left: X >= 0, Y >= 0
-            lb = np.array([0.0, 0.0,    -np.inf, -np.inf, -np.inf, -np.pi/2])
-            ub = np.array([np.inf, np.inf, np.inf, np.inf, np.inf, np.pi/2])
-
-        sol = least_squares(
-            res, 
-            self._x_prev, 
-            bounds=(lb, ub), 
-            xtol=1e-9,
-        )
+        sol = least_squares(res, self._x_prev, method="lm", xtol=1e-7, ftol=1e-7, gtol=1e-7)
         if not sol.success:
+            return
+        if (hp.wc[1] >= 0) != (sol.x[1] >= 0) or abs(sol.x[4]) > np.pi / 2:
+            log_to_file(f"[WARN] DoubleAArm solve landed on a mirrored/flipped root: x={sol.x}")
             return
         self._x_prev = sol.x.copy()
 
