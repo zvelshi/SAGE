@@ -30,6 +30,8 @@ M_ETA: 15
 #   type: floor     v must stay >= min
 #   type: limit     the general form: min and/or max, plus `stat`
 #   stat            value (default) | max | min | mean | range | abs_max
+#   bounds          bound several stats at once, e.g.
+#                     bounds: {max: {min: 406.4}, min: {min: 76.2}}
 #
 # type: collision -- keepout-zone interference over `scenario`; zones/groups
 #   come from KEEPOUT_ZONES / COLLISION_GROUPS below.
@@ -79,13 +81,15 @@ OBJECTIVES:
     max: 30.0
     cost_scale: 5.0
 
-  # Ground clearance must reach at least 406.4 mm somewhere in the heave sweep.
+  # Ground clearance over the heave sweep: peak (at full droop) at least
+  # 406.4 mm, and the dip (at full jounce) never below 76.2 mm.
   - name: GroundClearance
-    type: floor
+    type: limit
     metric: ground_clearance_mm
     scenario: heave
-    stat: max
-    min: 406.4
+    bounds:
+      max: {min: 406.4}
+      min: {min: 76.2}
     cost_scale: 50.0
 
   # Keepout-zone interference across the travel x steer sweep.
