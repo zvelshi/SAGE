@@ -1,17 +1,61 @@
-# GLOBAL OPTIMIZER
+# --- GLOBAL OPTIMIZER ---
 POP_SIZE: 75
 N_OFFSPRINGS: 75
 MAX_GEN: 40
 M_PROB: 1.0
 M_ETA: 15
 
-# OPTIMIZATION TO RUN
+# --- OBJECTIVES TO MINIMIZE ---
+# target_* objectives run `scenario`, read `metric` at each swept step, and cost
+# how far the metric drifts from a target curve:
+#
+#     cost = aggregate(metric(step) - target(x)) / cost_scale
+#
+# where `x` is the scenario's own sweep variable (rack travel, shock travel...).
+# The four target types differ only in how the curve is built, each a narrower
+# case of the one before it:
+#
+#   type: target_curve   points: [[x, y], ...]   piecewise-linear curve
+#   type: target_range   min / max               line between the two sweep endpoints
+#   type: target_const   const                   flat line at a constant
+#   type: target_zero    (nothing extra)         flat line at 0
+#
+# Shared target_* fields:
+#   name        label in logs / Pareto plots               (default: the metric)
+#   metric      toe_deg | camber_deg | caster_deg | kingpin_angle_deg |
+#               caster_trail_mm | kingpin_offset_wc_mm | ackermann_pct |
+#               track_change_mm | ... (any scalar key on a scenario step)
+#   scenario    travel | steer | droop_steer | jounce_steer | left_travel |
+#               right_travel | front_steer | sweep_space
+#   cost_scale  divisor on the aggregated error -- the error magnitude that
+#               should read as a cost of 1.0               (default: 1.0)
+#   aggregate   rmse | mean_abs | max_abs | max_abs_plus_range   (default: rmse)
+#
+# type: collision -- keepout-zone interference over `scenario` (default
+#   droop_steer); zones/groups come from KEEPOUT_ZONES / COLLISION_GROUPS below.
 OBJECTIVES:
-  - MinimumBumpSteer
-  - ParallelSteer
-  - PointToPointCollision
+  # Bump steer: toe angle stays flat at 0 through vertical travel.
+  - name: BumpSteer
+    type: target_zero
+    metric: toe_deg
+    scenario: travel
+    aggregate: max_abs_plus_range
+    cost_scale: 150.0
 
-# PARAMETERS TO OPTIMIZE
+  # Ackermann: ackermann_pct stays at 0 across the steer sweep.
+  - name: ParallelSteer
+    type: target_zero
+    metric: ackermann_pct
+    scenario: front_steer
+    cost_scale: 1400.0
+
+  # Keepout-zone interference.
+  - name: Interference
+    type: collision
+    scenario: droop_steer
+
+# --- PARAMETERS TO OPTIMIZE ---
+# Points are allowed to move within these bounded boxes.
 FREE_POINTS:
   "tie_rod_inboard":
     x: [-50.0, 10.0]
@@ -22,11 +66,9 @@ FREE_POINTS:
     y: [-50.0, 50.0]
     z: [-50.0, 50.0]
 
-# SCENARIO USED TO EVALUATE PointToPointCollision (default: droop_steer)
-COLLISION_SCENARIO: "droop_steer"
-
-# KEEPOUT ZONES: shapes extruded along the axis between point_a -> point_b.
-# At least 2 zones are required for collisions to be detected.
+# --- KEEPOUT ZONE ---
+# These are shapes extruded along the axis between point_a -> point_b, used
+# by `type: collision` objectives and the 3D config preview. >= 2 zones needed.
 #   shape: "cylinder" -> dim1 = radius (mm)
 #   shape: "box"      -> dim1 = side length 1 (mm), dim2 = side length 2 (mm)
 KEEPOUT_ZONES:
@@ -46,11 +88,10 @@ KEEPOUT_ZONES:
     shape: "cylinder"
     dim1: 12.0
 
-# COLLISION GROUPS (optional): zones within the SAME group are ALLOWED to overlap
-# (their collision is ignored, as if they don't exist to each other). Every other
-# pair -- zones in different groups, or an ungrouped zone vs anything -- IS checked,
-# and a collision there raises the cost. Also controls visualizer coloring: zones
-# sharing a group share a color; ungrouped zones each get their own.
+# --- COLLISION GROUPS (optional) ---
+# These are zones within the SAME group are ALLOWED to overlap (their collision is ignored). 
+# Every other pair -- zones in different groups, or an ungrouped zone vs anything -- IS 
+# checked, and a collision there raises the cost. Also controls visualizer coloring. 
 # Each group may hold up to 10 zones.
 COLLISION_GROUPS:
   group1:
