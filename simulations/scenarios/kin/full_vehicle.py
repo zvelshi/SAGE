@@ -29,10 +29,12 @@ class FullVehicleScenario(Scenario):
     def __init__(self, vehicle, config, mode: str):
         self.config = config
         self.mode = mode
+        self.vehicle = vehicle
         self.fl_solver = SingleCornerSolver(vehicle, corner_id=[0, 0])
         self.fr_solver = SingleCornerSolver(vehicle, corner_id=[1, 0])
         self.rl_solver = SingleCornerSolver(vehicle, corner_id=[0, 1])
         self.rr_solver = SingleCornerSolver(vehicle, corner_id=[1, 1])
+
         fl_hp, fr_hp = vehicle.front_left.hardpoints, vehicle.front_right.hardpoints
         rl_hp, rr_hp = vehicle.rear_left.hardpoints, vehicle.rear_right.hardpoints
         self.wr_front, self.wr_rear = fl_hp.wr, rl_hp.wr
@@ -41,9 +43,8 @@ class FullVehicleScenario(Scenario):
         self.static_wheelbase = (fl_hp.wc[0] + fr_hp.wc[0]) / 2.0 - (rl_hp.wc[0] + rr_hp.wc[0]) / 2.0
 
         tmin, tmax = config['TRAVEL']['MIN'], config['TRAVEL']['MAX']
-        probe = SingleCornerSolver(vehicle, corner_id=[0, 0])
-        at_min = probe.solve(steer_mm=0.0, travel_mm=tmin)
-        at_max = probe.solve(steer_mm=0.0, travel_mm=tmax)
+        at_min = self.fl_solver.solve(steer_mm=0.0, travel_mm=tmin)
+        at_max = self.fl_solver.solve(steer_mm=0.0, travel_mm=tmax)
         self.bump_min = (at_min['wc'][2] - fl_hp.wc[2]) if at_min else tmin
         self.bump_max = (at_max['wc'][2] - fl_hp.wc[2]) if at_max else tmax
 
