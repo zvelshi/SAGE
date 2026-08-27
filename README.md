@@ -67,6 +67,8 @@ SAGE has two interfaces: an interactive Web UI (`app.py`) and a CLI (`main.py`).
 ### 1. Interactive Web UI (`app.py`)
 The recommended way to use SAGE, and the only way to run dynamic simulations. Provides a live 3D viewer, 2D charts, dynamic-sim animation, a Pareto-front viewer for optimization runs, and in-browser YAML editing (with save-to-disk) for all three config files plus the hardpoints file.
 
+The 3D viewer carries a **parts tree** (top-right overlay): a checkbox per suspension component — per corner in the full-vehicle sims — to show/hide it. Hidden parts are skipped when the animation re-poses the scene, so hiding what you don't need also speeds up scrubbing.
+
 ```bash
 python app.py
 ```
@@ -111,7 +113,7 @@ Set `SIMULATION` in `config/kin_config.yml` to one of:
 | `sweep_space` | Full 2D sweep: `TRAVEL` (outer) × `STEER` (inner), `SIM_STEPS × SIM_STEPS` result rows. |
 | `extreme` | Resolves the extreme (max jounce/max droop) outboard-point positions at neutral/full-left/full-right steer, for **all four corners** at once, and exports them to `out/kin_sim/<timestamp>/HARDPOINTS_<name>.xlsx` (via the template at `utils/HARDPOINTS_TEMPLATE.xlsx`) for use in CAD. |
 | `front_steer` | Sweeps both front corners together across `STEER.MIN..MAX` and computes toe angle / Ackermann percentage, track change, and mechanical trail (ignores `HALF`/`SIDE`). |
-| `heave` | Sweeps all four corners together across `TRAVEL.MAX..MIN` (jounce to droop, ride motion), computing per-corner camber/caster/toe/motion-ratio, front/rear track change, wheelbase change, pitch angle, front/rear roll angle, and (front, double-A-arm only) roll center Y/Z. |
+| `heave` | Sweeps all four corners together across `TRAVEL.MAX..MIN` (jounce to droop, ride motion), computing per-corner camber/caster/toe/motion-ratio, front/rear track change, wheelbase change, pitch angle, front/rear roll angle, (front, double-A-arm only) roll center Y/Z, and front/rear ground clearance between the chassis-bottom plane (horizontal, 1in below the lowest inboard front lower-A-arm pickup) and the ground plane (through the front- and rear-axle contact-patch centres, parallel to the lateral axis) with the chassis–ground plane angle through travel. The ground/chassis planes, contact patches and front/rear clearance gauges render in the 3D view as a "Ground Clearance" branch of the parts tree (hidden by default). |
 | `roll` | Sweeps all four corners: the left side (front-left + rear-left) across `TRAVEL.MIN..MAX` while the right side sweeps `TRAVEL.MAX..MIN` (opposite) — a true full-vehicle roll, same metrics as `heave`. |
 
 `HALF`/`SIDE` (`'front'`/`'rear'`, `'left'`/`'right'`) select which single corner is simulated for the single-corner sweep types (`travel`, `steer`, `droop_steer`, `jounce_steer`, `left_travel`, `right_travel`, `sweep_space`). They're ignored by `front_steer` (always both fronts) and `extreme`/`heave`/`roll` (always all four corners).
