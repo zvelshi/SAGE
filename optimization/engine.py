@@ -15,6 +15,7 @@ from pymoo.operators.mutation.pm import PolynomialMutation
 from models.vehicle import Vehicle
 from simulations.scenarios.kin.front_steer import FrontSteerScenario
 from simulations.scenarios.kin.sweep import SuspensionSweep
+from simulations.scenarios.kin.full_vehicle import FullVehicleScenario, FULL_VEHICLE_TYPES
 from utils.misc import log_to_file
 
 class SuspensionProblem(ElementwiseProblem):
@@ -43,8 +44,7 @@ class SuspensionProblem(ElementwiseProblem):
             run_config = self.opt.config.copy()
             run_config["SIMULATION"] = s_type
 
-            scenario_cls = self.opt.get_scenario_class(s_type)
-            scenario = scenario_cls(vehicle, run_config)
+            scenario = self.opt.build_scenario(s_type, vehicle, run_config)
 
             try:
                 results = scenario.run()
@@ -135,14 +135,15 @@ class SuspensionOptimizer:
             new_hp_data[self.nickname][section][pt_name][axis_idx] = float(val)
         return Vehicle(new_hp_data)
 
-    def get_scenario_class(self, key: str):
-        """
-         Maps scenario keys to their corresponding classes.
-        """
-        if key in ['steer', 'travel', 'droop_steer', 'jounce_steer', "left_travel", "right_travel", "sweep_space"]: 
-            return SuspensionSweep
+    def build_scenario(self, key: str, vehicle: Vehicle, run_config: Dict):
+        """Instantiate the scenario a given key maps to, ready to .run()."""
+        if key in ['steer', 'travel', 'droop_steer', 'jounce_steer',
+                   'left_travel', 'right_travel', 'sweep_space']:
+            return SuspensionSweep(vehicle, run_config)
         if key == 'front_steer':
-            return FrontSteerScenario
+            return FrontSteerScenario(vehicle, run_config)
+        if key in FULL_VEHICLE_TYPES:
+            return FullVehicleScenario(vehicle, run_config, mode=key)
         raise ValueError(f"Unknown scenario type: {key}")
 
     def run(self):
