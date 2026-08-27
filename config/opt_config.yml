@@ -1,5 +1,5 @@
 # --- GLOBAL OPTIMIZER ---
-POP_SIZE: 75
+POP_SIZE: 60
 N_OFFSPRINGS: 30
 MAX_GEN: 40
 M_PROB: 1.0
@@ -55,11 +55,11 @@ OBJECTIVES:
     cost_scale: 150.0
 
   # Ackermann: ackermann_pct stays at 0 across the steer sweep.
-  - name: ParallelSteer
-    type: target_zero
-    metric: ackermann_pct
-    scenario: front_steer
-    cost_scale: 1400.0
+  # - name: ParallelSteer
+  #   type: target_zero
+  #   metric: ackermann_pct
+  #   scenario: front_steer
+  #   cost_scale: 1400.0
 
   # Axle plunge stays within +-15 mm everywhere in the travel x steer sweep.
   - name: AxlePlunge
@@ -106,6 +106,14 @@ FREE_POINTS:
     x: [-20.0, 15.0]
     y: [-50.0, 50.0]
     z: [-50.0, 50.0]
+  "shock_inboard":
+    x: [-50.0,  50.0]
+    y: [-10.0, 100.0]
+    z: [-50.0,  30.0]
+  "shock_outboard":
+    x: [0.0,    50.0]
+    y: [-20.0, 100.0]
+    z: [-50.0,  30.0]
 
 # --- KEEPOUT ZONE ---
 # These are shapes extruded along the axis between point_a -> point_b, used
@@ -128,6 +136,16 @@ KEEPOUT_ZONES:
     point_b: "ubj"
     shape: "cylinder"
     dim1: 12.0
+  - name: "lower_arm_f"
+    point_a: "lf"
+    point_b: "lbj"
+    shape: "cylinder"
+    dim1: 12.0
+  - name: "lower_arm_r"
+    point_a: "lr"
+    point_b: "lbj"
+    shape: "cylinder"
+    dim1: 12.0
 
 # --- COLLISION GROUPS (optional) ---
 # These are zones within the SAME group are ALLOWED to overlap (their collision is ignored). 
@@ -140,3 +158,6 @@ COLLISION_GROUPS:
   group2:
     - "upper_arm_f"
     - "upper_arm_r"
+  group3:
+    - "lower_arm_f"
+    - "lower_arm_r" 
