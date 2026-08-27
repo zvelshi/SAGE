@@ -187,8 +187,8 @@ M_ETA: 15                    # Polynomial mutation eta (distribution index)
 # OBJECTIVES TO MINIMIZE — every entry is a mapping with a `type:`.
 #   target_* : run `scenario`, read `metric` per step, cost the drift from a
 #              target curve:  aggregate(metric - target(x)) / cost_scale
-#   window / ceiling / floor / limit : keep `metric` (or a `stat` of it over the
-#              sweep) inside a band, cost the spill-out / cost_scale
+#   limit    : keep `bounds` statistics of `metric` over the sweep inside their
+#              bands, cost the spill-out / cost_scale
 #   collision : keepout-zone interference penalty over `scenario`
 OBJECTIVES:
   - name: BumpSteer            # toe flat at 0 through travel
@@ -203,18 +203,18 @@ OBJECTIVES:
     scenario: front_steer
     cost_scale: 1400.0
   - name: AxlePlunge           # CV plunge within ±15 mm over travel×steer
-    type: window
+    type: limit
     metric: axle_plunge_mm
     scenario: sweep_space
-    min: -15.0
-    max: 15.0
+    bounds:
+      value: {min: -15.0, max: 15.0}
     cost_scale: 5.0
   - name: AxleAngle            # peak CV angle under 30°
-    type: ceiling
+    type: limit
     metric: axle_angle_deg
     scenario: sweep_space
-    stat: abs_max
-    max: 30.0
+    bounds:
+      abs_max: {max: 30.0}
     cost_scale: 5.0
   - name: GroundClearance      # heave peak ≥ 406.4 mm, dip ≥ 76.2 mm
     type: limit
@@ -286,15 +286,12 @@ COLLISION_GROUPS:
 | `target_range` | `min`, `max` | Same, with `target` the straight line from `min` (at the sweep's lowest `x`) to `max` (at its highest). |
 | `target_const` | `const` | Same, with `target(x) = const` everywhere. |
 | `target_zero` | — | Same, with `target(x) = 0` everywhere. |
-| `limit` | `min` and/or `max`, `stat`; or `bounds` | `aggregate(max(0, min − v) + max(0, v − max)) / cost_scale`, where `v` is the per-step metric (`stat: value`) or a scalar summary of it (`stat: max` \| `min` \| `mean` \| `range` \| `abs_max`). `bounds` (`{stat: {min?, max?}}`) bounds several stats at once and sums their violations. |
-| `window` | `min`, `max` | `limit` with `stat: value` — the metric must stay inside `[min, max]` at every step. |
-| `ceiling` | `max`, `stat` | `limit` with only an upper bound. |
-| `floor` | `min`, `stat` | `limit` with only a lower bound. |
+| `limit` | `bounds: {stat: {min?, max?}}` | `aggregate(Σ max(0, min − s) + max(0, s − max)) / cost_scale`, summed over each bounded stat `s`. Stats: `value` (per step) \| `max` \| `min` \| `mean` \| `range` \| `abs_max`. |
 | `collision` | (uses top-level `KEEPOUT_ZONES` / `COLLISION_GROUPS`) | Mean penetration depth summed across all non-exempt keepout-zone pairs over the sweep. |
 
-Both families are literal inheritance chains: `TargetCurve` ← `TargetRange` / `TargetConstant` ← `TargetZero`, and `MetricLimit` ← `MetricCeiling` / `MetricFloor` / `MetricWindow`.
+The `target_*` family is a literal inheritance chain: `TargetCurve` ← `TargetRange` / `TargetConstant` ← `TargetZero`.
 
-Shared fields: `name` (label, default = the metric), `metric`, `scenario`, `cost_scale` (divisor, default `1.0`), `aggregate` (`rmse` | `mean_abs` | `max_abs` | `max_abs_plus_range`; default `rmse` for `target_*`, `max_abs` for limits). `metric` is one of the named helpers (`toe_deg`, `camber_deg`, `caster_deg`, `kingpin_angle_deg`, `caster_trail_mm`, `kingpin_offset_wc_mm`, `axle_plunge_mm`, `axle_angle_deg`, `ground_clearance_mm`) or any scalar / dotted (`axle_data.plunge_mm`) key on a scenario step. A failed/NaN step gives the `1e2` infeasibility penalty.
+Shared fields: `name` (label, default = the metric), `metric`, `scenario`, `cost_scale` (divisor, default `1.0`), `aggregate` (`rmse` | `mean_abs` | `max_abs` | `max_abs_plus_range`; default `rmse` for `target_*`, `max_abs` for `limit`). `metric` is one of the named helpers (`toe_deg`, `camber_deg`, `caster_deg`, `kingpin_angle_deg`, `caster_trail_mm`, `kingpin_offset_wc_mm`, `axle_plunge_mm`, `axle_angle_deg`, `ground_clearance_mm`) or any scalar / dotted (`axle_data.plunge_mm`) key on a scenario step. A failed/NaN step gives the `1e2` infeasibility penalty.
 
 Scenarios still receive the full merged `kin_config.yml` + `opt_config.yml` dict, so keys like `TRAVEL`, `STEER`, `SIM_STEPS` apply during optimization. `scenario` may be any of `travel` / `steer` / `droop_steer` / `jounce_steer` / `left_travel` / `right_travel` / `sweep_space` / `front_steer` / `heave` / `roll`.
 
