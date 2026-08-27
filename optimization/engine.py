@@ -1,6 +1,5 @@
 # default
 import time
-import copy
 from typing import List, Dict, Any
 
 # third-party
@@ -131,12 +130,19 @@ class SuspensionOptimizer:
 
     def create_vehicle_from_ref(self, x: np.ndarray) -> Vehicle:
         """
-        Creates a new Vehicle instance by patching the base dictionary.
+        Creates a new Vehicle by patching only the free-point coordinates onto a
+        structural copy of the base hardpoint tree. Vehicle() copies every point
+        into its own np.array on build (see Hardpoints.from_data), so the large
+        shared remainder of the tree is never mutated -- no need to deep-copy it.
         """
-        new_hp_data = copy.deepcopy(self.base_hp_data)
+        inner = dict(self.base_hp_data[self.nickname])
+        for section in {sec for sec, _, _ in self.points_map}:
+            inner[section] = dict(inner[section])
+        for section, pt_name in {(sec, pt) for sec, pt, _ in self.points_map}:
+            inner[section][pt_name] = list(inner[section][pt_name])
         for val, (section, pt_name, axis_idx) in zip(x, self.points_map):
-            new_hp_data[self.nickname][section][pt_name][axis_idx] = float(val)
-        return Vehicle(new_hp_data)
+            inner[section][pt_name][axis_idx] = float(val)
+        return Vehicle({self.nickname: inner})
 
     def build_scenario(self, key: str, vehicle: Vehicle, run_config: Dict):
         """Instantiate the scenario a given key maps to, ready to .run()."""
