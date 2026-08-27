@@ -168,7 +168,7 @@ def _run_opt(kin_text: str, opt_text: str):
     with open(f"config/hardpoints/{kin_cfg['HARDPOINTS']}.yml") as f:
         hp_data = yaml.safe_load(f)
     cfg = {**kin_cfg, **opt_cfg}
-    objectives = [getattr(opt_objs, n)(config=cfg) for n in cfg.get("OBJECTIVES", [])]
+    objectives = opt_objs.build_objectives(cfg)
     optimizer = SuspensionOptimizer(hp_data, cfg, objectives)
     res = optimizer.run()
 
@@ -192,7 +192,7 @@ def _load_opt_run(run_dir: str):
         hp_data = yaml.safe_load(f)
 
     cfg = payload["cfg"]
-    objectives = [getattr(opt_objs, n)(config=cfg) for n in cfg.get("OBJECTIVES", [])]
+    objectives = opt_objs.build_objectives(cfg)
     optimizer = SuspensionOptimizer(hp_data, cfg, objectives)
     optimizer.all_X = [np.array(x, dtype=float) for x in (payload.get("all_X") or [])]
     optimizer.all_F = [np.array(f, dtype=float) for f in (payload.get("all_F") or [])]
