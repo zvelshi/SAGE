@@ -28,3 +28,4 @@ include = ["models*", "simulations*", "optimization*", "utils*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["slow: spins up a process pool (deselect with -m 'not slow')"]

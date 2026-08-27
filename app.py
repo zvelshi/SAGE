@@ -1071,4 +1071,8 @@ def main_page():
 
     _refresh_run_options()
 
-ui.run(title="SAGE", port=8080, reload=False, show=True, favicon="🌿")
+
+# guarded so optimizer pool workers (which re-import the main module under
+# multiprocessing 'spawn') don't try to start a second server
+if __name__ == "__main__":
+    ui.run(title="SAGE", port=8080, reload=False, show=True, favicon="🌿")

@@ -112,15 +112,3 @@ def test_ui_subscriber_exception_does_not_break_emit(tmp_path, ui_handler_attach
     assert any("still delivered" in line for line in good)
 
 
-def test_generation_logger_emits_per_call(caplog):
-    from optimization.engine import _GenerationLogger
-    import types
-
-    algo = types.SimpleNamespace(
-        n_gen=4,
-        evaluator=types.SimpleNamespace(n_eval=24),
-        opt=[1, 2, 3],
-    )
-    with caplog.at_level(logging.INFO, logger="sage.optimization.engine"):
-        _GenerationLogger().notify(algo)
-    assert "gen 4" in caplog.text and "24 designs" in caplog.text

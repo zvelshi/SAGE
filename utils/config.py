@@ -14,6 +14,7 @@ optimizer swapping ``simulation`` per objective).
 from __future__ import annotations
 
 # default
+import os
 from pathlib import Path
 from typing import Annotated, Any, Literal, Union
 
@@ -235,6 +236,12 @@ class OptConfig(_Model):
     max_gen: int = Field(alias="MAX_GEN", default=50, gt=0)
     m_prob: float = Field(alias="M_PROB", default=1.0, ge=0.0, le=1.0)
     m_eta: float = Field(alias="M_ETA", default=15.0, gt=0.0)
+    n_workers: int = Field(
+        alias="N_WORKERS",
+        default_factory=lambda: min(os.cpu_count() or 1, 8),
+        ge=1,
+        description="process-pool size for design evaluation; 1 = serial",
+    )
     objectives: list[ObjectiveSpec] = Field(alias="OBJECTIVES", min_length=1)
     free_points: dict[str, AxisBox] = Field(alias="FREE_POINTS", default_factory=dict)
     keepout_zones: list[KeepoutZone] = Field(alias="KEEPOUT_ZONES", default_factory=list)
