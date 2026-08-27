@@ -184,14 +184,12 @@ M_PROB: 1.0                 # Polynomial mutation probability
 M_ETA: 15                    # Polynomial mutation eta (distribution index)
 # Note: the optimizer's random seed is hardcoded to 1 in optimization/engine.py — not configurable via YAML.
 
-# OBJECTIVES TO MINIMIZE — every entry is a mapping with a `type:`. The target_*
-# types run `scenario`, read `metric` at each swept step, and cost the drift
-# from a target curve:  aggregate(metric - target(x)) / cost_scale
-#   type: target_curve  points: [[x, y], ...]   arbitrary piecewise-linear curve
-#   type: target_range  min / max               line between the two sweep endpoints
-#   type: target_const  const                   flat line at a constant
-#   type: target_zero   (nothing extra)         flat line at 0
-#   type: collision     (KEEPOUT_ZONES below)   keepout-zone interference penalty
+# OBJECTIVES TO MINIMIZE — every entry is a mapping with a `type:`.
+#   target_* : run `scenario`, read `metric` per step, cost the drift from a
+#              target curve:  aggregate(metric - target(x)) / cost_scale
+#   window / ceiling / floor / limit : keep `metric` (or a `stat` of it over the
+#              sweep) inside a band, cost the spill-out / cost_scale
+#   collision : keepout-zone interference penalty over `scenario`
 OBJECTIVES:
   - name: BumpSteer            # toe flat at 0 through travel
     type: target_zero
@@ -204,9 +202,30 @@ OBJECTIVES:
     metric: ackermann_pct
     scenario: front_steer
     cost_scale: 1400.0
+  - name: AxlePlunge           # CV plunge within ±15 mm over travel×steer
+    type: window
+    metric: axle_plunge_mm
+    scenario: sweep_space
+    min: -15.0
+    max: 15.0
+    cost_scale: 5.0
+  - name: AxleAngle            # peak CV angle under 30°
+    type: ceiling
+    metric: axle_angle_deg
+    scenario: sweep_space
+    stat: abs_max
+    max: 30.0
+    cost_scale: 5.0
+  - name: GroundClearance      # heave must lift clearance to ≥ 406.4 mm
+    type: floor
+    metric: ground_clearance_mm
+    scenario: heave
+    stat: max
+    min: 406.4
+    cost_scale: 50.0
   - name: Interference
     type: collision
-    scenario: droop_steer
+    scenario: sweep_space
 
 # PARAMETERS TO OPTIMIZE — hardpoint names from the HALF ('front'/'rear', from kin_config.yml)
 # section of the active hardpoints file. Ranges are OFFSETS from each point's
@@ -266,13 +285,17 @@ COLLISION_GROUPS:
 | `target_range` | `min`, `max` | Same, with `target` the straight line from `min` (at the sweep's lowest `x`) to `max` (at its highest). |
 | `target_const` | `const` | Same, with `target(x) = const` everywhere. |
 | `target_zero` | — | Same, with `target(x) = 0` everywhere. |
+| `limit` | `min` and/or `max`, `stat` | `aggregate(max(0, min − v) + max(0, v − max)) / cost_scale`, where `v` is the per-step metric (`stat: value`) or a scalar summary of it (`stat: max` \| `min` \| `mean` \| `range` \| `abs_max`). |
+| `window` | `min`, `max` | `limit` with `stat: value` — the metric must stay inside `[min, max]` at every step. |
+| `ceiling` | `max`, `stat` | `limit` with only an upper bound. |
+| `floor` | `min`, `stat` | `limit` with only a lower bound. |
 | `collision` | (uses top-level `KEEPOUT_ZONES` / `COLLISION_GROUPS`) | Mean penetration depth summed across all non-exempt keepout-zone pairs over the sweep. |
 
-The `target_*` chain is literal inheritance: `TargetCurve` ← `TargetRange` / `TargetConstant` ← `TargetZero`.
+Both families are literal inheritance chains: `TargetCurve` ← `TargetRange` / `TargetConstant` ← `TargetZero`, and `MetricLimit` ← `MetricCeiling` / `MetricFloor` / `MetricWindow`.
 
-Shared `target_*` fields: `name` (label, default = the metric), `metric`, `scenario`, `cost_scale` (divisor, default `1.0`), `aggregate` (`rmse` | `mean_abs` | `max_abs` | `max_abs_plus_range`, default `rmse`). `metric` is one of the named helpers (`toe_deg`, `camber_deg`, `caster_deg`, `kingpin_angle_deg`, `caster_trail_mm`, `kingpin_offset_wc_mm`) or any scalar key present on a scenario step (`ackermann_pct`, `track_change_mm`, …). A failed/NaN step gives the `1e2` infeasibility penalty.
+Shared fields: `name` (label, default = the metric), `metric`, `scenario`, `cost_scale` (divisor, default `1.0`), `aggregate` (`rmse` | `mean_abs` | `max_abs` | `max_abs_plus_range`; default `rmse` for `target_*`, `max_abs` for limits). `metric` is one of the named helpers (`toe_deg`, `camber_deg`, `caster_deg`, `kingpin_angle_deg`, `caster_trail_mm`, `kingpin_offset_wc_mm`, `axle_plunge_mm`, `axle_angle_deg`, `ground_clearance_mm`) or any scalar / dotted (`axle_data.plunge_mm`) key on a scenario step. A failed/NaN step gives the `1e2` infeasibility penalty.
 
-Scenarios still receive the full merged `kin_config.yml` + `opt_config.yml` dict, so keys like `TRAVEL`, `STEER`, `SIM_STEPS` apply during optimization.
+Scenarios still receive the full merged `kin_config.yml` + `opt_config.yml` dict, so keys like `TRAVEL`, `STEER`, `SIM_STEPS` apply during optimization. `scenario` may be any of `travel` / `steer` / `droop_steer` / `jounce_steer` / `left_travel` / `right_travel` / `sweep_space` / `front_steer` / `heave` / `roll`.
 
 Run it:
 ```bash
