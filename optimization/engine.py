@@ -194,6 +194,17 @@ class SuspensionOptimizer:
 
         self._parse_config_bounds()
 
+        # Heave/roll need a wheel-bump envelope. Calibrate it ONCE from the base
+        # geometry -- per-candidate calibration is slow (dozens of extra solves)
+        # and fragile for far-perturbed designs. A candidate whose motion ratio
+        # drifts from the base just loses its most extreme heave/roll steps, via
+        # each corner's own post-solve shock-limit guard.
+        self._heave_bump_limits = None
+        if any(o.get_scenario_type() in FULL_VEHICLE_TYPES for o in objectives):
+            self._heave_bump_limits = Vehicle(base_vehicle).bump_z_limits
+            log.info("heave/roll bump_z envelope (base geometry): front %.1f..%.1f, rear %.1f..%.1f mm",
+                     *self._heave_bump_limits["front"], *self._heave_bump_limits["rear"])
+
     def __getstate__(self):
         """Ship a lean copy to pool workers -- they never touch the run history."""
         state = self.__dict__.copy()
@@ -238,7 +249,8 @@ class SuspensionOptimizer:
             return FrontSteerScenario(vehicle, sweep)
         if key in FULL_VEHICLE_TYPES:
             need_rc = any("roll_center" in getattr(o, "metric", "") for o in self.objectives)
-            return FullVehicleScenario(vehicle, sweep, mode=key, roll_center=need_rc)
+            return FullVehicleScenario(vehicle, sweep, mode=key, roll_center=need_rc,
+                                       bump_z_limits=self._heave_bump_limits)
         raise ValueError(f"Unknown scenario type: {key}")
 
     # ------------------------------------------------------------------ run ---

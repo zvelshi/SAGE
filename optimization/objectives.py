@@ -247,8 +247,14 @@ class MetricLimit(OptimizationObjective):
 
     def calculate_cost(self, results):
         vals = np.array([_resolve_metric(self.metric, s) for s in results], dtype=float)
-        if not np.all(np.isfinite(vals)):
-            return 1e2
+        finite = np.isfinite(vals)
+        if not finite.all():
+            # heave/roll can drop a few extreme steps when a candidate's motion
+            # ratio puts a shock past its limit before the swept range ends --
+            # score on what solved, but a mostly-failed sweep is infeasible.
+            if finite.sum() < max(2, int(0.6 * len(vals))):
+                return 1e2
+            vals = vals[finite]
         parts = []
         for stat, lo, hi in self.constraints:
             v = STAT_REDUCERS[stat](vals)

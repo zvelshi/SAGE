@@ -29,7 +29,8 @@ class FullVehicleScenario(Scenario):
     actually travels across TRAVEL.MIN..MAX, so it stays in the same ballpark as the
     other kin scenarios' travel range."""
 
-    def __init__(self, vehicle, config: SweepConfig, mode: str, roll_center: bool = True):
+    def __init__(self, vehicle, config: SweepConfig, mode: str, roll_center: bool = True,
+                 bump_z_limits: dict | None = None):
         self.config = config
         self.mode = mode
         self.vehicle = vehicle
@@ -54,8 +55,11 @@ class FullVehicleScenario(Scenario):
         # clamp by the config TRAVEL range (shock-mm, converted to wheel-mm per axle
         # with a quick solve -- if TRAVEL asks for more than is mechanically
         # possible the solve returns None and the mechanical limit stands).
-        f_lo, f_hi = vehicle.bump_z_limits["front"]
-        r_lo, r_hi = vehicle.bump_z_limits["rear"]
+        # per-run calibration (from the base geometry) when the optimizer supplies
+        # it, otherwise this vehicle's own
+        limits = bump_z_limits if bump_z_limits is not None else vehicle.bump_z_limits
+        f_lo, f_hi = limits["front"]
+        r_lo, r_hi = limits["rear"]
         lo_candidates = [max(f_lo, r_lo)]
         hi_candidates = [min(f_hi, r_hi)]
         for scs, corner, hp in ((self.fl_solver, vehicle.front_left, fl_hp),
