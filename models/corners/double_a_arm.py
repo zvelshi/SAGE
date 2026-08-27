@@ -3,12 +3,12 @@ from __future__ import annotations
 
 # ours
 from models.components.axle import Axle
+from models.corners._kinematics import euler_xyz, cross3
 from utils.misc import log_to_file
 
 # third-party
 import numpy as np
 from scipy.optimize import least_squares
-from scipy.spatial.transform import Rotation as R
 
 class DoubleAArmNumeric:
     def __init__(self, hp, axle: Axle):
@@ -62,7 +62,7 @@ class DoubleAArmNumeric:
 
     @staticmethod
     def _rot(eul: np.ndarray) -> np.ndarray:
-        return R.from_euler("xyz", eul).as_matrix()
+        return euler_xyz(eul)
 
     def _shock_outboard(self, current_ball: np.ndarray) -> np.ndarray:
         """Current shock/damper outboard point, given the live position of the ball
@@ -74,9 +74,9 @@ class DoubleAArmNumeric:
         v1 = current_ball - self._sh_axis_foot
         denom = np.sqrt(self._sh_v0_normsq * np.dot(v1, v1))
         cos_t = np.dot(self._sh_v0, v1) / denom
-        sin_t = np.dot(np.cross(self._sh_v0, v1), axis) / denom
+        sin_t = np.dot(cross3(self._sh_v0, v1), axis) / denom
         v = self.sh_vec
-        v_rot = (v * cos_t + np.cross(axis, v) * sin_t
+        v_rot = (v * cos_t + cross3(axis, v) * sin_t
                  + axis * np.dot(axis, v) * (1.0 - cos_t))
         return current_ball + v_rot
 

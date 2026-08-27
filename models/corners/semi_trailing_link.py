@@ -3,12 +3,12 @@ from typing import Dict
 
 # ours
 from models.components.axle import Axle
+from models.corners._kinematics import euler_xyz
 from utils.misc import log_to_file
 
 # third-party
 import numpy as np
 from scipy.optimize import least_squares
-from scipy.spatial.transform import Rotation as R
 
 class SemiTrailingLinkNumeric:
     def __init__(self, hp, axle: Axle):
@@ -42,7 +42,7 @@ class SemiTrailingLinkNumeric:
 
     @staticmethod
     def _rot(eul: np.ndarray) -> np.ndarray:
-        return R.from_euler("xyz", eul).as_matrix()
+        return euler_xyz(eul)
 
     def solve(
         self,
