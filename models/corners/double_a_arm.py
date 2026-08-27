@@ -4,7 +4,9 @@ from __future__ import annotations
 # ours
 from models.components.axle import Axle
 from models.corners._kinematics import euler_xyz, cross3
-from utils.misc import log_to_file
+from utils.logging_setup import get_logger
+
+log = get_logger(__name__)
 
 # third-party
 import numpy as np
@@ -92,7 +94,8 @@ class DoubleAArmNumeric:
         hp = self.hp
         target_shock = self._shock0 - travel_mm if travel_mm is not None else None
         if target_shock and not (hp.shock_min <= target_shock <= hp.shock_max):
-            log_to_file(f"[WARN] Target shock length {target_shock:.2f}mm out of bounds ({hp.shock_min}-{hp.shock_max}mm)")
+            log.debug("target shock length %.2fmm out of bounds (%s-%smm)",
+                      target_shock, hp.shock_min, hp.shock_max)
             return None
 
         target_wheel = self._wc0 + bump_z if bump_z is not None else None
@@ -141,7 +144,7 @@ class DoubleAArmNumeric:
         if not sol.success:
             return
         if (hp.wc[1] >= 0) != (sol.x[1] >= 0) or abs(sol.x[4]) > np.pi / 2:
-            log_to_file(f"[WARN] DoubleAArm solve landed on a mirrored/flipped root: x={sol.x}")
+            log.debug("DoubleAArm solve landed on a mirrored/flipped root: x=%s", sol.x)
             return
         self._x_prev = sol.x.copy()
 

@@ -9,7 +9,9 @@ from simulations.scenarios.base import Scenario
 from simulations.solvers import SingleCornerSolver
 from utils.config import SweepConfig
 from utils.geometry import calculate_ackermann_percentage, get_toe_angle, get_mechanical_trail
-from utils.misc import log_to_file
+from utils.logging_setup import get_logger
+
+log = get_logger(__name__)
 
 class FrontSteerScenario(Scenario):
     """
@@ -28,7 +30,7 @@ class FrontSteerScenario(Scenario):
 
     def run(self) -> List[Dict]:
         results = []
-        log_to_file("Starting Ackermann Analysis...")
+        log.debug("ackermann analysis")
 
         wb = abs(self.vehicle.front_left.hardpoints.wc[0] - self.vehicle.rear_left.hardpoints.wc[0])
         tw = abs(self.vehicle.front_left.hardpoints.wc[1] - self.vehicle.front_right.hardpoints.wc[1])
@@ -72,7 +74,7 @@ class FrontSteerScenario(Scenario):
                     "trail_r_mm": trail_r,
                 })
             else:
-                log_to_file(f"[WARN] Ackermann step failed at input {input:.2f}. Left={bool(left)}, Right={bool(right)}")
+                log.debug("ackermann step failed at input %.2f (left=%s right=%s)", input, bool(left), bool(right))
                 results.append({
                     "input": input,
                     "left": left,

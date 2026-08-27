@@ -1,115 +1,38 @@
 # default
-import sys
 import os
 import datetime
 import shutil
 import pandas as pd
 import yaml
 
-# Subscribers are notified with each completed line written via DualLogger,
-# independent of any particular DualLogger instance (so a UI can subscribe
-# before the first run has ever created one).
-_console_subscribers: list = []
+# ours
+from utils.logging_setup import get_logger
 
-def add_console_subscriber(fn) -> None:
-    _console_subscribers.append(fn)
+log = get_logger(__name__)
 
-def remove_console_subscriber(fn) -> None:
-    if fn in _console_subscribers:
-        _console_subscribers.remove(fn)
 
-class DualLogger(object):
-    """
-    Writes to both the terminal and a log file simultaneously.
-    Buffers partial writes to ensure [INFO] tags only appear on full lines.
-    """
-    def __init__(self, filepath):
-        self.terminal = sys.stdout
-        self.log = open(filepath, "a", encoding='utf-8')
-        self.buffer = ""
-
-    def set_new_log(self, filepath):
-        """Closes the current log and starts writing to a new one."""
-        self.log.close()
-        self.log = open(filepath, "a", encoding='utf-8')
-
-    def write(self, message):
-        """Standard print() calls go here: Terminal + File"""
-        try:
-            self.terminal.write(message)
-        except UnicodeEncodeError:
-            enc = getattr(self.terminal, "encoding", None) or "ascii"
-            self.terminal.write(message.encode(enc, errors="replace").decode(enc))
-        if message:
-            self.buffer += message
-            if "\n" in self.buffer:
-                lines = self.buffer.split("\n")
-                for line in lines[:-1]:
-                    timestamp = datetime.datetime.now().strftime("[%H:%M:%S]")
-                    self.log.write(f"{timestamp} [INFO]  {line}\n")
-                    for sub in list(_console_subscribers):
-                        try:
-                            sub(line)
-                        except Exception:
-                            pass
-                self.buffer = lines[-1]
-                self.log.flush()
-
-    def flush(self):
-        self.terminal.flush()
-        self.log.flush()
-        
-    def debug(self, message):
-        """Writes ONLY to the log file, skipping the terminal."""
-        timestamp = datetime.datetime.now().strftime("[%H:%M:%S]")
-        msg_str = str(message).strip() # Clean up input
-        self.log.write(f"{timestamp} [DEBUG] {msg_str}\n")
-        self.log.flush()
-
-def setup_logging(mode: str):
-    """
-    Creates a dedicated timestamped folder for the run and redirects logs there.
-    Returns: The path to the new run directory.
-    """
-    base_dir = "out"
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_dir = os.path.join(base_dir, mode, timestamp)
+def new_run_dir(mode: str) -> str:
+    """Create a timestamped ``out/<mode>/<ts>/`` directory and return its path."""
+    run_dir = os.path.join("out", mode, datetime.datetime.now().strftime("%Y%m%d_%H%M%S"))
     os.makedirs(run_dir, exist_ok=True)
-    log_path = os.path.join(run_dir, "run.log")
-    if not isinstance(sys.stdout, DualLogger):
-        sys.stdout = DualLogger(log_path)
-        sys.stderr = sys.stdout
-    else:
-        sys.stdout.set_new_log(log_path)
-    print(f"--- Run Directory Created: {run_dir} ---")
-    print(f"--- Logging Started: {log_path} ---")
     return run_dir
 
-def log_to_file(message):
-    """
-    Helper function to print debug info ONLY to the log file.
-    Usage: log_to_file("This is a secret debug message")
-    """
-    if hasattr(sys.stdout, 'debug'):
-        sys.stdout.debug(message)
 
 def save_configs(run_dir, config_files, hardpoints_name):
     """
     Copies relevant config files to the run directory for reproducibility.
     """
-    log_to_file("-> Backing up configuration files...")
-    
     for cfg in config_files:
         if os.path.exists(cfg):
             shutil.copy(cfg, run_dir)
-            log_to_file(f"Backed up config: {cfg}")
+            log.debug("backed up config %s", cfg)
 
     hp_path = f"config/hardpoints/{hardpoints_name}.yml"
     if os.path.exists(hp_path):
         shutil.copy(hp_path, run_dir)
-        log_to_file(f"Backed up hardpoints: {hp_path}")
+        log.debug("backed up hardpoints %s", hp_path)
     else:
-        log_to_file(f"WARNING: Could not find hardpoints file: {hp_path}")
+        log.warning("could not find hardpoints file to back up: %s", hp_path)
 
 def pack_points_nicely(vehicle, id, step):
     """
@@ -134,7 +57,7 @@ def export_static_hardpoints(vehicle, settled_step, hardpoints_name, run_dir):
     """
     src_path = f"config/hardpoints/{hardpoints_name}.yml"
     if not os.path.exists(src_path):
-        log_to_file(f"WARNING: Could not find hardpoints file to export: {src_path}")
+        log.warning("could not find hardpoints file to export: %s", src_path)
         return None
 
     with open(src_path) as f:
@@ -155,15 +78,14 @@ def export_static_hardpoints(vehicle, settled_step, hardpoints_name, run_dir):
     with open(export_path, "w") as f:
         yaml.safe_dump(data, f, sort_keys=False)
 
-    log_to_file(f"Exported settled hardpoints to: {export_path}")
+    log.info("exported settled hardpoints to %s", export_path)
     return export_path
 
 def export_extreme_points_to_xlsx(results, run_dir, sweep, template_path="example.xlsx"):
-    log_to_file("-> Generating Extreme Points XLSX Export...")
+    log.debug("generating extreme-points xlsx export")
     
     if not os.path.exists(template_path):
-        print(f"[WARN] Template '{template_path}' not found. Skipping XLSX export.")
-        log_to_file(f"[WARN] Template '{template_path}' not found.")
+        log.warning("xlsx template not found, skipping export: %s", template_path)
         return
 
     df_template = pd.read_excel(template_path, header=None)
@@ -266,5 +188,4 @@ def export_extreme_points_to_xlsx(results, run_dir, sweep, template_path="exampl
     df_out = pd.DataFrame(output_data)
     df_out.to_excel(export_path, index=False, header=False)
     
-    print(f"-> Extreme Points Design Table exported successfully to:\n   {export_path}")
-    log_to_file(f"Design Table saved to {export_path}")
+    log.info("extreme-points design table exported to %s", export_path)

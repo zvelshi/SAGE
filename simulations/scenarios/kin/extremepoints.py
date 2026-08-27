@@ -5,7 +5,10 @@ from typing import List, Dict, Any
 from simulations.scenarios.base import Scenario
 from simulations.solvers import SingleCornerSolver
 from utils.config import SweepConfig
-from utils.misc import log_to_file, pack_points_nicely
+from utils.logging_setup import get_logger
+from utils.misc import pack_points_nicely
+
+log = get_logger(__name__)
 
 class ExtremePoints(Scenario):
     def __init__(self, vehicle, config: SweepConfig):
@@ -13,7 +16,7 @@ class ExtremePoints(Scenario):
         self.vehicle = vehicle
 
     def run(self) -> List[Dict]:
-        log_to_file(f"Starting ExtremePoints Simulation for all corners...")
+        log.debug("extreme-points analysis, all corners")
 
         raw_pkg = {}
         corners = [[0, 0], [1, 0], [0, 1], [1, 1]]
@@ -28,7 +31,7 @@ class ExtremePoints(Scenario):
         }
 
         for id in corners:
-            log_to_file(f"Finding extreme points for corner {id}...")
+            log.debug("extreme points for corner %s", id)
             sol = SingleCornerSolver(self.vehicle, id)
             corner = self.vehicle.get_corner_from_id(id)
             hp = corner.hardpoints
@@ -36,8 +39,7 @@ class ExtremePoints(Scenario):
             # Solve static first to get the baseline shock length
             static_step = sol.solve(travel_mm=0, steer_mm=0)
             if static_step is None:
-                print(f"[WARN] Failed to find static position for corner {id}")
-                log_to_file(f"[WARN] Failed to find static position for corner {id}")
+                log.warning("failed to find static position for corner %s", id)
                 continue
                 
             shock_static = static_step["shock_length"]
@@ -60,8 +62,7 @@ class ExtremePoints(Scenario):
                     key = f"side{id[0]}_half{id[1]}_{t_name}_{s_name}"
                     
                     if step is None:
-                        print(f"[WARN] No solution found for {key} at travel={t_val:.2f}mm, steer={s_val}mm")
-                        log_to_file(f"[WARN] No solution found for {key} at travel={t_val:.2f}mm, steer={s_val}mm")
+                        log.debug("no solution for %s at travel=%.2fmm steer=%smm", key, t_val, s_val)
                     else:
                         pack = pack_points_nicely(self.vehicle, id, step)
                         raw_pkg[key] = pack if pack else {"error": "No solution found"}
@@ -92,6 +93,6 @@ class ExtremePoints(Scenario):
             for side, conditions in sides.items():
                 for condition, steer_data in conditions.items():
                     for steer, data in steer_data.items():
-                        print(f"\n--- {half.upper()} - {side.upper()} - {condition.upper()} - {steer.upper()} ---")
+                        log.debug("extreme point: %s %s %s %s", half, side, condition, steer)
 
         return pack

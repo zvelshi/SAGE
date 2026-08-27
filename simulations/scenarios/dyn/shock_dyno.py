@@ -7,7 +7,9 @@ import numpy as np
 # ours
 from simulations.scenarios.base import Scenario
 from utils.config import DynConfig
-from utils.misc import log_to_file
+from utils.logging_setup import get_logger
+
+log = get_logger(__name__)
 
 class ShockDyno(Scenario):
     """
@@ -31,8 +33,7 @@ class ShockDyno(Scenario):
         self._on_progress(float(np.clip(fraction, 0.0, 1.0)), message)
 
     def run(self) -> List[Dict]:
-        print(f"ShockDyno | Frequency: {self.freq_hz} Hz | Stroke: {self.stroke_mm} mm")
-        log_to_file(f"ShockDyno: freq={self.freq_hz}Hz, stroke={self.stroke_mm}mm")
+        log.info("ShockDyno: %.2f Hz, %.1f mm stroke", self.freq_hz, self.stroke_mm)
         
         # Get the targeted shock from the vehicle based on KIN config
         # Default to rear right if not specified for some reason
@@ -43,7 +44,7 @@ class ShockDyno(Scenario):
         # Ensure stroke doesn't exceed total shock travel
         total_travel = shock.shock_max - shock.shock_min
         if self.stroke_mm > total_travel:
-            print(f"  Warning: requested stroke ({self.stroke_mm}mm) exceeds total travel. Capping to {total_travel}mm.")
+            log.warning("requested stroke %.1fmm exceeds shock travel; capping to %.1fmm", self.stroke_mm, total_travel)
             self.stroke_mm = total_travel
 
         amplitude = self.stroke_mm / 2.0

@@ -10,7 +10,9 @@ import numpy as np
 # ours
 from simulations.scenarios.base import Scenario
 from utils.config import DynConfig
-from utils.misc import log_to_file
+from utils.logging_setup import get_logger
+
+log = get_logger(__name__)
 from utils.dynamics import (
     derivatives, euler_step, solve_all_corners, build_step_dict, initial_shock_lengths,
     CORNERS_ATTR, IDX_Z_COG, IDX_PHI, IDX_THETA, IDX_DZ_COG, IDX_DPHI, IDX_DTHETA,
@@ -64,16 +66,10 @@ class StaticDrop(Scenario):
         log_10pct_h = max(1, round(0.10 * hoist_steps))
         log_10pct_d = max(1, round(0.10 * drop_steps))
 
-        print(f"StaticDrop | {vehicle.nickname}")
-        print(f"  Hoist: CoG {z_cog_hoist:.0f} mm  (+{self.hoist_height_mm:.0f} mm)  "
-              f"for {self.hoist_duration:.2f} s  ({hoist_steps:,} steps)")
-        print(f"  Drop:  max {self.max_sim_time:.2f} s  ({drop_steps:,} steps) | "
-              f"SOL_DT={dt*1000:.1f} ms  VIZ_DT={viz_dt*1000:.0f} ms")
-
-        log_to_file(f"StaticDrop: hoist_height={self.hoist_height_mm:.0f} mm, "
-                    f"hoist_duration={self.hoist_duration:.2f} s, "
-                    f"sol_dt={dt:.4f} s, viz_dt={viz_dt:.4f} s, "
-                    f"max_sim_time={self.max_sim_time:.1f} s")
+        log.info("StaticDrop %s: hoist CoG +%.0fmm for %.2fs (%d steps), drop <= %.2fs "
+                 "(%d steps), sol_dt=%.1fms viz_dt=%.0fms",
+                 vehicle.nickname, self.hoist_height_mm, self.hoist_duration, hoist_steps,
+                 self.max_sim_time, drop_steps, dt * 1000, viz_dt * 1000)
 
         # Initialize state
         self._progress(0.05, "Initializing state...")
@@ -92,7 +88,7 @@ class StaticDrop(Scenario):
 
         # Phase 1: Hoist
         self._progress(0.08, "Phase 1/2: hoisting — suspension drooping...")
-        print(f"  [HOIST] t=0.000 s — starting ({hoist_steps:,} steps)")
+        log.info("hoist phase: %d steps", hoist_steps)
 
         log_pct_next = log_10pct_h
         for step_i in range(hoist_steps):
@@ -121,21 +117,18 @@ class StaticDrop(Scenario):
             if step_i + 1 >= log_pct_next:
                 pct = (step_i + 1) / hoist_steps
                 z_wu = state[IDX_Z_WU]
-                print(f"  [HOIST {pct*100:3.0f}%] t={t:.3f} s  "
-                      f"wheel z: FL={z_wu[0]:.0f} FR={z_wu[1]:.0f} "
-                      f"RL={z_wu[2]:.0f} RR={z_wu[3]:.0f} mm")
-                log_to_file(f"  [HOIST {pct*100:.0f}%] t={t:.3f}s  z_wu={z_wu.tolist()}")
+                log.debug("hoist %.0f%% t=%.3fs wheel z FL=%.0f FR=%.0f RL=%.0f RR=%.0f",
+                          pct * 100, t, z_wu[0], z_wu[1], z_wu[2], z_wu[3])
                 self._progress(0.08 + pct * 0.42, f"Phase 1/2: hoisting ({pct*100:.0f}%)…")
                 log_pct_next += log_10pct_h
 
         hoist_n = len(steps)
-        print(f"  [HOIST] done — {hoist_n} viz frames, "
-              f"avg wheel hub = {state[IDX_Z_WU].mean():.1f} mm")
-        log_to_file(f"StaticDrop: hoist done at t={t:.3f} s, {hoist_n} viz frames")
+        log.info("hoist done at t=%.3fs, %d viz frames, avg hub %.1fmm",
+                 t, hoist_n, state[IDX_Z_WU].mean())
 
         # Phase 2: Drop
         self._progress(0.50, "Phase 2/2: dropping — vehicle in free fall...")
-        print(f"  [DROP]  t={t:.3f} s — releasing body ({drop_steps:,} steps max)")
+        log.info("drop phase: releasing body at t=%.3fs (<= %d steps)", t, drop_steps)
 
         settle_window_s = 0.5
         settle_window_steps = max(1, round(settle_window_s / dt))
@@ -159,9 +152,7 @@ class StaticDrop(Scenario):
                 labels = ["FL", "FR", "RL", "RR"]
                 in_contact = [labels[i] for i in range(4) if z_wu[i] - wheel_r <= 0.0]
                 if in_contact:
-                    print(f"  [DROP]  t={t:.3f} s — first ground contact: "
-                          f"{', '.join(in_contact)}")
-                    log_to_file(f"StaticDrop: first contact t={t:.3f} s: {in_contact}")
+                    log.info("first ground contact at t=%.3fs: %s", t, ", ".join(in_contact))
                     contact_logged = True
 
             if step_i + 1 >= log_pct_next:
@@ -171,12 +162,8 @@ class StaticDrop(Scenario):
                 theta_deg = float(np.degrees(state[IDX_THETA]))
                 max_vel = float(np.max(np.abs(
                     np.concatenate([state[3:6], state[10:14]]))))
-                print(f"  [DROP  {pct*100:3.0f}%] t={t:.3f} s  "
-                      f"CoG z={z_cog_now:.1f} mm  roll={phi_deg:.2f}°  "
-                      f"pitch={theta_deg:.2f}deg  max|v|={max_vel:.0f} mm/s")
-                log_to_file(f"  [DROP {pct*100:.0f}%] t={t:.3f}s  "
-                            f"z_cog={z_cog_now:.1f}  phi={phi_deg:.3f}°  "
-                            f"theta={theta_deg:.3f}°  max_vel={max_vel:.1f}")
+                log.debug("drop %.0f%% t=%.3fs CoG z=%.1f roll=%.2f pitch=%.2f max|v|=%.0f",
+                          pct * 100, t, z_cog_now, phi_deg, theta_deg, max_vel)
                 self._progress(0.50 + pct * 0.45,
                                f"Phase 2/2: drop ({pct*100:.0f}%) — "
                                f"CoG z={z_cog_now:.0f} mm  max|v|={max_vel:.0f} mm/s")
@@ -184,21 +171,16 @@ class StaticDrop(Scenario):
 
             if _is_settled(state, z_cog_history, z_cog_static):
                 z_final = state[IDX_Z_COG]
-                print(f"  [DROP]  t={t:.3f} s — SETTLED  "
-                      f"CoG z={z_final:.1f} mm  "
-                      f"(Δ from static = {z_final - z_cog_static:+.1f} mm)")
-                log_to_file(f"StaticDrop: settled t={t:.3f}s  "
-                            f"z_cog={z_final:.2f}  delta={z_final - z_cog_static:+.2f} mm")
+                log.info("SETTLED at t=%.3fs: CoG z=%.1fmm (delta from static %+.1fmm)",
+                         t, z_final, z_final - z_cog_static)
                 cs = solve_all_corners(state, vehicle, cog_static)
                 steps.append(build_step_dict(state, cs, vehicle, t, "settled"))
                 break
         else:
-            print(f"  [DROP]  reached MAX_SIM_TIME={self.max_sim_time:.1f} s without settling")
-            log_to_file(f"StaticDrop: hit MAX_SIM_TIME without settling")
+            log.warning("reached MAX_SIM_TIME=%.1fs without settling", self.max_sim_time)
 
         total = len(steps)
-        print(f"  StaticDrop done — {total} viz frames "
-              f"({hoist_n} hoist + {total - hoist_n} drop)")
-        log_to_file(f"StaticDrop: complete — {total} total viz frames")
+        log.info("StaticDrop complete: %d viz frames (%d hoist + %d drop)",
+                 total, hoist_n, total - hoist_n)
         self._progress(1.0, f"Done — {total} frames ready")
         return steps

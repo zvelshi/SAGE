@@ -8,7 +8,9 @@ import numpy as np
 from simulations.scenarios.base import Scenario
 from simulations.solvers import SingleCornerSolver
 from utils.config import SweepConfig
-from utils.misc import log_to_file
+from utils.logging_setup import get_logger
+
+log = get_logger(__name__)
 
 class SuspensionSweep(Scenario):
     """
@@ -36,7 +38,7 @@ class SuspensionSweep(Scenario):
             return np.linspace(rng.min, rng.max, count)
 
         sim_type = self.config.simulation
-        log_to_file(f"Starting SuspensionSweep: {sim_type} on corner {self.corner_id}")
+        log.debug("sweep %s on corner %s", sim_type, self.corner_id)
 
         if sim_type == "steer":
             steer_vals = get_range('STEER')
@@ -47,7 +49,7 @@ class SuspensionSweep(Scenario):
                     res['x_label'] = "Rack Travel [mm]"
                     steps.append(res)
                 else:
-                    log_to_file(f"[WARN] Steer sweep step failed at {s:.2f}mm")
+                    log.debug("steer sweep step failed at %.2fmm", s)
 
         elif sim_type == "travel":
             travel_vals = get_range('TRAVEL')
@@ -58,7 +60,7 @@ class SuspensionSweep(Scenario):
                     res['x_label'] = "Shock Travel [mm]"
                     steps.append(res)
                 else:
-                    log_to_file(f"[WARN] Travel sweep step failed at {t:.2f}mm")
+                    log.debug("travel sweep step failed at %.2fmm", t)
 
         elif sim_type == "droop_steer":
             steer_vals = get_range('STEER')
@@ -69,7 +71,7 @@ class SuspensionSweep(Scenario):
                     res['x_label'] = "Rack Travel [mm]"
                     steps.append(res)
                 else:
-                    log_to_file(f"[WARN] Steer sweep step failed at {s:.2f}mm")
+                    log.debug("steer sweep step failed at %.2fmm", s)
 
         elif sim_type == "jounce_steer":
             steer_vals = get_range('STEER')
@@ -80,7 +82,7 @@ class SuspensionSweep(Scenario):
                     res['x_label'] = "Rack Travel [mm]"
                     steps.append(res)
                 else:
-                    log_to_file(f"[WARN] Steer sweep step failed at {s:.2f}mm")
+                    log.debug("steer sweep step failed at %.2fmm", s)
 
         elif sim_type == "left_travel":
             travel_vals = get_range('TRAVEL')
@@ -91,7 +93,7 @@ class SuspensionSweep(Scenario):
                     res['x_label'] = "Shock Travel [mm]"
                     steps.append(res)
                 else:
-                    log_to_file(f"[WARN] Travel sweep step failed at {t:.2f}mm")
+                    log.debug("travel sweep step failed at %.2fmm", t)
 
         elif sim_type == "right_travel":
             travel_vals = get_range('TRAVEL')
@@ -102,7 +104,7 @@ class SuspensionSweep(Scenario):
                     res['x_label'] = "Shock Travel [mm]"
                     steps.append(res)
                 else:
-                    log_to_file(f"[WARN] Travel sweep step failed at {t:.2f}mm")
+                    log.debug("travel sweep step failed at %.2fmm", t)
                   
         elif sim_type == "sweep_space":
             travel_vals = get_range('TRAVEL')
@@ -115,5 +117,5 @@ class SuspensionSweep(Scenario):
                         res['x_label'] = "Shock Travel [mm]"
                         steps.append(res)
                     else:
-                        log_to_file(f"[WARN] Travel sweep step failed at {t:.2f}mm")
+                        log.debug("travel sweep step failed at %.2fmm", t)
         return steps

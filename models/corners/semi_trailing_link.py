@@ -4,7 +4,9 @@ from typing import Dict
 # ours
 from models.components.axle import Axle
 from models.corners._kinematics import euler_xyz
-from utils.misc import log_to_file
+from utils.logging_setup import get_logger
+
+log = get_logger(__name__)
 
 # third-party
 import numpy as np
@@ -58,7 +60,8 @@ class SemiTrailingLinkNumeric:
 
         targ_shock = self._shock_0 - travel_mm if travel_mm is not None else None
         if targ_shock is not None and not (hp.shock_min <= targ_shock <= hp.shock_max):
-            log_to_file(f"[WARN] Target shock length {targ_shock:.2f}mm out of bounds ({hp.shock_min}-{hp.shock_max}mm)")
+            log.debug("target shock length %.2fmm out of bounds (%s-%smm)",
+                      targ_shock, hp.shock_min, hp.shock_max)
             return None
         targ_wcz = self._wc_z0 + bump_z if bump_z is not None else None
 
@@ -105,7 +108,7 @@ class SemiTrailingLinkNumeric:
         sol = least_squares(res, self._x_prev, method="lm", xtol=1e-7, ftol=1e-7, gtol=1e-7)
 
         if not sol.success:
-            print(f"Solution failed: {sol.message}")
+            log.debug("SemiTrailingLink solve failed: %s", sol.message)
             return None
 
         self._x_prev = sol.x.copy()

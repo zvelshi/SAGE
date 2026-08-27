@@ -9,7 +9,9 @@ import numpy as np
 
 # ours
 from utils.geometry import get_wheel_attitude, motion_ratio_series
-from utils.misc import log_to_file
+from utils.logging_setup import get_logger
+
+log = get_logger(__name__)
 from utils.plot2d import _build_kin_stats, _build_dyn_stats
 from simulations.scenarios.kin.full_vehicle import FULL_VEHICLE_TYPES
 
@@ -213,7 +215,7 @@ def export_kin_run_data(run_dir: str, sim_type: str, steps, vehicle, corner_id: 
     with open(os.path.join(run_dir, _RUN_META_JSON), "w") as f:
         json.dump({"mode": "kin", "sim_type": sim_type, "hardpoints_name": hardpoints_name}, f)
 
-    log_to_file(f"Exported run data: {_KIN_DATA_JSON}" + (f", {_KIN_DATA_CSV}" if series else ""))
+    log.debug("exported run data: %s%s", _KIN_DATA_JSON, f", {_KIN_DATA_CSV}" if series else "")
 
 def load_kin_run_data(run_dir: str) -> dict:
     with open(os.path.join(run_dir, _KIN_DATA_JSON)) as f:
@@ -284,7 +286,7 @@ def export_dyn_run_data(run_dir: str, sim_type: str, steps, vehicle, hardpoints_
     with open(os.path.join(run_dir, _RUN_META_JSON), "w") as f:
         json.dump({"mode": "dyn", "sim_type": sim_type, "hardpoints_name": hardpoints_name}, f)
 
-    log_to_file(f"Exported run data: {_DYN_DATA_JSON}" + (f", {_DYN_DATA_CSV}" if series else ""))
+    log.debug("exported run data: %s%s", _DYN_DATA_JSON, f", {_DYN_DATA_CSV}" if series else "")
 
 def load_dyn_run_data(run_dir: str) -> dict:
     with open(os.path.join(run_dir, _DYN_DATA_JSON)) as f:
@@ -311,7 +313,7 @@ def export_opt_run_data(run_dir: str, res, optimizer, hardpoints_name: str) -> N
     with open(os.path.join(run_dir, _RUN_META_JSON), "w") as f:
         json.dump({"mode": "opt", "sim_type": "run", "hardpoints_name": hardpoints_name}, f)
 
-    log_to_file(f"Exported run data: {_OPT_DATA_JSON}")
+    log.debug("exported run data: %s", _OPT_DATA_JSON)
 
 def load_opt_run_data(run_dir: str) -> dict:
     with open(os.path.join(run_dir, _OPT_DATA_JSON)) as f:

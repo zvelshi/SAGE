@@ -16,7 +16,9 @@ from models.components.cv_joint import CVJoint, PlungingCVJoint
 from models.components.shock import Shock
 from models.wheel import Wheel
 from utils.spatial import Point, Plane
-from utils.misc import log_to_file
+from utils.logging_setup import get_logger
+
+log = get_logger(__name__)
 
 class Vehicle:
     nickname: str
@@ -47,9 +49,9 @@ class Vehicle:
         self.cog_point = Point(self.cog)
         self.chassis_bottom_plane = self._build_chassis_bottom_plane()
 
-        log_to_file(f"Initialized Vehicle '{self.nickname}'")
-        log_to_file(f"Calculated COG at (x={self.cog[0]:.2f}, y={self.cog[1]:.2f}, z={self.cog[2]:.2f})")
-        log_to_file(f"Total Sprung Mass: {self.total_sprung_mass:.2f} kg | Front Bias: {self.sprung_bias_f*100:.1f}%")
+        log.debug("initialized vehicle '%s'", self.nickname)
+        log.debug("CoG at (%.2f, %.2f, %.2f)", *self.cog)
+        log.debug("sprung mass %.2f kg, front bias %.1f%%", self.total_sprung_mass, self.sprung_bias_f * 100)
 
     def _build_chassis_bottom_plane(self):
         """Chassis-bottom reference plane for ground-clearance analysis: horizontal
@@ -58,12 +60,11 @@ class Vehicle:
         ``lower_a_arm_rear``). Returns None if the front corner has no lower A-arm."""
         hp = self.front_left.hardpoints
         if not (hasattr(hp, "lf") and hasattr(hp, "lr")):
-            log_to_file("Chassis bottom plane: front corner has no lower A-arm; skipped.")
+            log.debug("chassis bottom plane: front corner has no lower A-arm; skipped")
             return None
         lowest_inboard = min((Point(hp.lf), Point(hp.lr)), key=lambda p: p.z)
         plane = Plane.horizontal_through(lowest_inboard.translated(dz=-25.4))
-        log_to_file(f"Chassis bottom plane at Z={plane.point.z:.2f}mm "
-                    f"(1in below inboard lower-A-arm point {lowest_inboard!r})")
+        log.debug("chassis bottom plane at Z=%.2fmm (1in below %r)", plane.point.z, lowest_inboard)
         return plane
 
     def get_corner_from_id(self, id) -> 'Corner':

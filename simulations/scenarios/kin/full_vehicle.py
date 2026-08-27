@@ -9,9 +9,11 @@ import numpy as np
 from simulations.scenarios.base import Scenario
 from simulations.solvers import SingleCornerSolver
 from utils.config import SweepConfig
+from utils.logging_setup import get_logger
 from utils.geometry import roll_center_yz, get_contact_patch
 from utils.spatial import Point, Line, Plane
-from utils.misc import log_to_file
+
+log = get_logger(__name__)
 
 FULL_VEHICLE_TYPES = {"roll", "heave"}
 
@@ -176,7 +178,7 @@ class FullVehicleScenario(Scenario):
 
     def run(self) -> List[Dict]:
         steps = []
-        log_to_file(f"Starting FullVehicleScenario: {self.mode} mode")
+        log.debug("full-vehicle scenario, %s mode", self.mode)
         bmin, bmax = self.bump_min, self.bump_max
         # heave sweeps jounce -> droop (all four corners together); roll sweeps
         # droop -> jounce since it's paired against a mirrored opposite-side value
@@ -213,8 +215,8 @@ class FullVehicleScenario(Scenario):
                     perturbed = (None,) * 8
                 steps.append(self._build_step(b, fl, fr, rl, rr, perturbed))
             else:
-                log_to_file(f"[WARN] Full vehicle {self.mode} step failed at input {b:.2f}mm. "
-                            f"FL={bool(fl)} FR={bool(fr)} RL={bool(rl)} RR={bool(rr)}")
+                log.debug("full-vehicle %s step failed at input %.2fmm (FL=%s FR=%s RL=%s RR=%s)",
+                          self.mode, b, bool(fl), bool(fr), bool(rl), bool(rr))
                 steps.append(self._nan_step(b, fl, fr, rl, rr))
 
         return steps

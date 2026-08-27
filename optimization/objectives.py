@@ -24,7 +24,10 @@ from utils.geometry import (
     get_caster_trail,
     get_kingpin_offset_wheel,
 )
+from utils.logging_setup import get_logger
 from utils.spatial import Segment
+
+log = get_logger(__name__)
 
 # ===========================================================================
 # Optimizer objectives
@@ -283,9 +286,9 @@ class CollisionObjective(OptimizationObjective):
         self.groups = (opt.collision_groups if opt else None)
         self._pairs = self._build_pairs()
         if not self._pairs:
-            print(f"WARNING: collision objective '{self.name}' has no collidable zone pairs "
-                  f"(zones={len(self.zones)}, groups={'set' if self.groups else 'unset'}). "
-                  f"Cost will always be 0.")
+            log.warning("collision objective '%s' has no collidable zone pairs "
+                        "(zones=%d, groups=%s); cost will always be 0",
+                        self.name, len(self.zones), "set" if self.groups else "unset")
 
     def _build_pairs(self):
         if not self.groups:

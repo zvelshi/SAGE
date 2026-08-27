@@ -26,7 +26,9 @@ from utils.plot2d import (_build_kin_figures, _build_front_steer_figures,
                            _build_dyno_figures, _build_sweep_space_figures, rank_solutions)
 from simulations.scenarios.kin.full_vehicle import FULL_VEHICLE_TYPES
 from models.vehicle import Vehicle
-from utils.misc import add_console_subscriber, remove_console_subscriber
+from utils.logging_setup import add_console_subscriber, remove_console_subscriber, init_logging
+
+init_logging()
 
 # global constants
 FPS = 30

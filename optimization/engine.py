@@ -1,9 +1,11 @@
 # default
+import logging
 import time
 from typing import List, Dict, Any
 
 # third-party
 import numpy as np
+from pymoo.core.callback import Callback
 from pymoo.core.problem import ElementwiseProblem
 from pymoo.algorithms.moo.nsga2 import NSGA2
 from pymoo.optimize import minimize
@@ -17,7 +19,17 @@ from simulations.scenarios.kin.sweep import SuspensionSweep
 from simulations.scenarios.kin.full_vehicle import FullVehicleScenario, FULL_VEHICLE_TYPES
 from models.vehicle_config import VehicleConfig
 from utils.config import OptConfig, SweepConfig
-from utils.misc import log_to_file
+from utils.logging_setup import get_logger
+
+log = get_logger(__name__)
+
+
+class _GenerationLogger(Callback):
+    """Logs one line per NSGA-II generation (replaces relying on pymoo's stdout)."""
+
+    def notify(self, algorithm):
+        log.info("gen %d | %d designs evaluated | %d on front",
+                 algorithm.n_gen, algorithm.evaluator.n_eval, len(algorithm.opt))
 
 class SuspensionProblem(ElementwiseProblem):
     def __init__(self, optimizer):
@@ -35,8 +47,8 @@ class SuspensionProblem(ElementwiseProblem):
         """
         vehicle = self.opt.create_vehicle_from_ref(x)
 
-        x_str = ", ".join([f"{v:.4f}" for v in x])
-        log_to_file(f"[EVAL] Testing Design: [{x_str}]")
+        if log.isEnabledFor(logging.DEBUG):
+            log.debug("eval design [%s]", ", ".join(f"{v:.4f}" for v in x))
         costs = []
 
         results_by_scenario: Dict[str, Any] = {}
@@ -49,7 +61,7 @@ class SuspensionProblem(ElementwiseProblem):
                 try:
                     results_by_scenario[s_type] = scenario.run()
                 except Exception as e:
-                    log_to_file(f"  [CRASH] Sim '{s_type}' failed: {e}")
+                    log.warning("scenario '%s' crashed: %s", s_type, e)
                     results_by_scenario[s_type] = None
 
             results = results_by_scenario[s_type]
@@ -61,7 +73,7 @@ class SuspensionProblem(ElementwiseProblem):
                     val = obj.calculate_cost(results)
                     costs.append(val)
                 except Exception as e:
-                    log_to_file(f"  [ERROR] {obj.name} cost calc failed: {e}")
+                    log.warning("%s cost calc failed: %s", obj.name, e)
                     costs.append(1e2)
 
         out["F"] = np.array(costs)
@@ -69,8 +81,8 @@ class SuspensionProblem(ElementwiseProblem):
         self.opt.all_X.append(np.array(x, dtype=float))
         self.opt.all_F.append(np.array(costs, dtype=float))
 
-        c_str = ", ".join([f"{c:.6f}" for c in costs])
-        log_to_file(f"  -> Result Costs: [{c_str}]")
+        if log.isEnabledFor(logging.DEBUG):
+            log.debug("costs [%s]", ", ".join(f"{c:.6f}" for c in costs))
 
 class SuspensionOptimizer:
     def __init__(
@@ -111,7 +123,7 @@ class SuspensionOptimizer:
 
         for pt_name, box in self.opt.free_points.items():
             if not hasattr(corner_cfg, pt_name):
-                print(f"WARNING: Point '{pt_name}' not found in '{half}' hardpoints. Skipping.")
+                log.warning("FREE_POINTS point '%s' not in '%s' hardpoints; skipping", pt_name, half)
                 continue
 
             current_xyz = getattr(corner_cfg, pt_name)
@@ -153,19 +165,14 @@ class SuspensionOptimizer:
         """
         Main optimization routine.
         """
-        print(f"--- Starting MOO ---")
         num_vars = len(self.x0)
         num_objs = len(self.objectives)
-        
         pop_size = self.opt.pop_size
         n_offsprings = self.opt.n_offsprings
-        prob = self.opt.m_prob
-        eta = self.opt.m_eta
-        
-        print(f"Optimizing {num_vars} variables for {num_objs} objectives.")
-        print(f"Population: {pop_size} | Offspring/Gen: {n_offsprings}")
-        log_to_file(f"Setup: Vars={num_vars}, Objs={num_objs}, Pop={pop_size}, Offspring={n_offsprings}")
-        log_to_file(f"Bounds: {self.bounds}")
+
+        log.info("starting MOO: %d vars, %d objectives, pop %d, %d offspring/gen, %d gens",
+                 num_vars, num_objs, pop_size, n_offsprings, self.opt.max_gen)
+        log.debug("bounds: %s", self.bounds)
 
         problem = SuspensionProblem(self)
         xl = np.array([b[0] for b in self.bounds])
@@ -173,38 +180,33 @@ class SuspensionOptimizer:
         initial_pop = np.random.random((pop_size, num_vars)) * (xu - xl) + xl
         if len(self.x0) > 0:
             initial_pop[0, :] = np.array(self.x0)
-            log_to_file(f"Seeding Initial Design: {self.x0}")
+            log.debug("seeding initial design: %s", self.x0)
 
         algorithm = NSGA2(
             pop_size=pop_size,
             n_offsprings=n_offsprings,
             sampling=initial_pop,
-            mutation=PolynomialMutation(prob=prob, eta=eta),
+            mutation=PolynomialMutation(prob=self.opt.m_prob, eta=self.opt.m_eta),
             eliminate_duplicates=True
         )
-
-        termination = get_termination("n_gen", self.opt.max_gen)
 
         t0 = time.time()
         res = minimize(
             problem,
             algorithm,
-            termination,
+            get_termination("n_gen", self.opt.max_gen),
             seed=1,
             save_history=True,
-            verbose=True
+            verbose=True,
+            callback=_GenerationLogger(),
         )
 
         self.pareto_front = res.F
         self.pareto_set = res.X
 
         duration = time.time() - t0
-        print(f"\nOptimization Complete in {duration:.2f}s.")
-        print(f"Found {len(res.F)} non-dominated solutions (Pareto Front).")
-
-        log_to_file("\n" + "="*50)
-        log_to_file(f"OPTIMIZATION RESULTS (Time: {duration:.2f}s)")
-        log_to_file(f"Pareto Front Size: {len(res.F)}")
-        log_to_file("="*50)
-
+        feasible = int(np.sum([np.all(np.asarray(f) <= 1e2) for f in self.all_F])) if self.all_F else 0
+        log.info("optimization complete: %d designs (%d feasible), %d on front, %.1fs (%.3fs/design)",
+                 len(self.all_F), feasible, len(res.F), duration,
+                 duration / max(len(self.all_F), 1))
         return res
