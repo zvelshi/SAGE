@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 # default
+from functools import cached_property
 from typing import Tuple
 
 # third-party
@@ -67,6 +68,21 @@ class Vehicle:
         log.debug("chassis bottom plane at Z=%.2fmm (1in below %r)", plane.point.z, lowest_inboard)
         return plane
 
+    @cached_property
+    def bump_z_limits(self) -> dict:
+        """Wheel-bump (bump_z) envelope per axle, from each side's shock stroke.
+        Front and rear have different motion ratios, so the same shock travel
+        moves their wheels by different amounts -- the heave/roll scenarios use
+        this to keep their wheel-bump input inside every corner's shock limits.
+        Computed lazily: only heave/roll need it, and it costs a few extra solves."""
+        limits = {
+            "front": self.front_left._bump_z_range(),
+            "rear":  self.rear_left._bump_z_range(),
+        }
+        log.debug("bump_z envelope front %.1f..%.1f mm, rear %.1f..%.1f mm",
+                  *limits["front"], *limits["rear"])
+        return limits
+
     def get_corner_from_id(self, id) -> 'Corner':
         if id == [0, 0]: return self.front_left
         if id == [1, 0]: return self.front_right
@@ -111,3 +127,24 @@ class Corner:
         self.solver = DoubleAArmNumeric(hp, axle) if isinstance(hp, DoubleAArm) else SemiTrailingLinkNumeric(hp, axle)
         self.shock = Shock.from_config(corner_cfg.shock_setup, config.shock_max, config.shock_min)
         self.wheel = Wheel.from_config(config)
+
+    def _bump_z_range(self) -> Tuple[float, float]:
+        """Wheel-center Z offsets (droop-negative) this corner reaches at its two
+        shock-travel limits -- the mechanically reachable wheel-bump envelope for
+        this axle. The solver seed is reset afterwards so later sims start clean."""
+        solver = self.solver
+        hp = self.hardpoints
+        shock_static = solver.len["shock_static"]
+        wc_z0 = float(hp.wc[2])
+        offsets = []
+        for target_len in (hp.shock_max - 1e-4, hp.shock_min + 1e-4):
+            step = solver.solve(travel_mm=shock_static - target_len)
+            if step is not None:
+                offsets.append(float(step["wc"][2]) - wc_z0)
+            else:
+                log.warning("corner %s cannot solve at shock length %.2fmm; "
+                            "heave/roll range may be degraded", self.id, target_len)
+        solver.reset()
+        if len(offsets) < 2:
+            return (0.0, 0.0)
+        return (min(offsets), max(offsets))

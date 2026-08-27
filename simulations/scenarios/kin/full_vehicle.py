@@ -48,11 +48,28 @@ class FullVehicleScenario(Scenario):
         self.static_rear_track  = abs(rl_hp.wc[1] - rr_hp.wc[1])
         self.static_wheelbase = (fl_hp.wc[0] + fr_hp.wc[0]) / 2.0 - (rl_hp.wc[0] + rr_hp.wc[0]) / 2.0
 
-        tmin, tmax = config.travel.min, config.travel.max
-        at_min = self.fl_solver.solve(steer_mm=0.0, travel_mm=tmin)
-        at_max = self.fl_solver.solve(steer_mm=0.0, travel_mm=tmax)
-        self.bump_min = (at_min['wc'][2] - fl_hp.wc[2]) if at_min else tmin
-        self.bump_max = (at_max['wc'][2] - fl_hp.wc[2]) if at_max else tmax
+        # bump_z sweep envelope: start from the mechanically reachable range each
+        # axle has between its shock limits (precomputed on the Vehicle), intersect
+        # the two axles so the synced whole-car motion never bottoms a shock, then
+        # clamp by the config TRAVEL range (shock-mm, converted to wheel-mm per axle
+        # with a quick solve -- if TRAVEL asks for more than is mechanically
+        # possible the solve returns None and the mechanical limit stands).
+        f_lo, f_hi = vehicle.bump_z_limits["front"]
+        r_lo, r_hi = vehicle.bump_z_limits["rear"]
+        lo_candidates = [max(f_lo, r_lo)]
+        hi_candidates = [min(f_hi, r_hi)]
+        for scs, corner, hp in ((self.fl_solver, vehicle.front_left, fl_hp),
+                                (self.rl_solver, vehicle.rear_left, rl_hp)):
+            at_min = scs.solve(steer_mm=0.0, travel_mm=config.travel.min)
+            at_max = scs.solve(steer_mm=0.0, travel_mm=config.travel.max)
+            if at_min:
+                lo_candidates.append(at_min['wc'][2] - hp.wc[2])
+            if at_max:
+                hi_candidates.append(at_max['wc'][2] - hp.wc[2])
+            corner.solver.reset()
+        self.bump_min = max(lo_candidates)
+        self.bump_max = min(hi_candidates)
+        log.debug("%s bump_z envelope: %.2f .. %.2f mm", mode, self.bump_min, self.bump_max)
 
         # Roll center height is conventionally quoted above the ground (the tire
         # contact patch at static ride height), not above the hardpoints' raw Z=0 --
