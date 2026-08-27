@@ -128,23 +128,42 @@ class Corner:
         self.shock = Shock.from_config(corner_cfg.shock_setup, config.shock_max, config.shock_min)
         self.wheel = Wheel.from_config(config)
 
+    _BUMP_MARCH_STEP_MM = 4.0
+
     def _bump_z_range(self) -> Tuple[float, float]:
-        """Wheel-center Z offsets (droop-negative) this corner reaches at its two
-        shock-travel limits -- the mechanically reachable wheel-bump envelope for
-        this axle. The solver seed is reset afterwards so later sims start clean."""
+        """Wheel-center Z offsets (droop-negative) this corner reaches between its
+        two shock-travel limits -- the mechanically reachable wheel-bump envelope
+        for this axle, used to bound the heave/roll scenarios.
+
+        Marches outward from the static pose in small warm-started steps rather
+        than jumping straight to the shock limit: a far-articulated pose is a big
+        ask for a cold local solve, and a linkage that binds before its shock
+        limit should report the smaller range it can actually reach. Resets the
+        solver seed afterwards."""
         solver = self.solver
         hp = self.hardpoints
         shock_static = solver.len["shock_static"]
         wc_z0 = float(hp.wc[2])
-        offsets = []
-        for target_len in (hp.shock_max - 1e-4, hp.shock_min + 1e-4):
-            step = solver.solve(travel_mm=shock_static - target_len)
-            if step is not None:
-                offsets.append(float(step["wc"][2]) - wc_z0)
-            else:
-                log.warning("corner %s cannot solve at shock length %.2fmm; "
-                            "heave/roll range may be degraded", self.id, target_len)
+        step_mm = self._BUMP_MARCH_STEP_MM
+
+        def march(sign: float) -> float:
+            solver.reset()
+            reached, t = 0.0, 0.0
+            limit_travel = shock_static - (hp.shock_min if sign > 0 else hp.shock_max)
+            while True:
+                t += sign * step_mm
+                if (sign > 0 and t >= limit_travel) or (sign < 0 and t <= limit_travel):
+                    t = limit_travel  # final step sits exactly on the shock limit
+                step = solver.solve(travel_mm=t)
+                if step is None:
+                    log.debug("corner %s bump march stopped at travel %.1fmm", self.id, t)
+                    break
+                reached = float(step["wc"][2]) - wc_z0
+                if t == limit_travel:
+                    break
+            return reached
+
+        hi = march(+1.0)   # jounce: shock compresses toward shock_min
+        lo = march(-1.0)   # droop:  shock extends toward shock_max
         solver.reset()
-        if len(offsets) < 2:
-            return (0.0, 0.0)
-        return (min(offsets), max(offsets))
+        return (min(lo, hi, 0.0), max(lo, hi, 0.0))
