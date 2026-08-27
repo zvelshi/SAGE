@@ -20,19 +20,31 @@ M_ETA: 15
 #   type: target_const   const                   flat line at a constant
 #   type: target_zero    (nothing extra)         flat line at 0
 #
-# Shared target_* fields:
+# limit / bound objectives instead keep a metric -- or one statistic of it over
+# the sweep -- inside a band, costing only the spill-out:
+#
+#     cost = aggregate(max(0, min - v) + max(0, v - max)) / cost_scale
+#
+#   type: window    v = each step; must stay within [min, max]
+#   type: ceiling   v must stay <= max
+#   type: floor     v must stay >= min
+#   type: limit     the general form: min and/or max, plus `stat`
+#   stat            value (default) | max | min | mean | range | abs_max
+#
+# type: collision -- keepout-zone interference over `scenario`; zones/groups
+#   come from KEEPOUT_ZONES / COLLISION_GROUPS below.
+#
+# Shared fields:
 #   name        label in logs / Pareto plots               (default: the metric)
 #   metric      toe_deg | camber_deg | caster_deg | kingpin_angle_deg |
 #               caster_trail_mm | kingpin_offset_wc_mm | ackermann_pct |
-#               track_change_mm | ... (any scalar key on a scenario step)
+#               track_change_mm | axle_plunge_mm | axle_angle_deg |
+#               ground_clearance_mm | ... (any scalar or dotted step key)
 #   scenario    travel | steer | droop_steer | jounce_steer | left_travel |
-#               right_travel | front_steer | sweep_space
-#   cost_scale  divisor on the aggregated error -- the error magnitude that
-#               should read as a cost of 1.0               (default: 1.0)
-#   aggregate   rmse | mean_abs | max_abs | max_abs_plus_range   (default: rmse)
-#
-# type: collision -- keepout-zone interference over `scenario` (default
-#   droop_steer); zones/groups come from KEEPOUT_ZONES / COLLISION_GROUPS below.
+#               right_travel | sweep_space | front_steer | heave | roll
+#   cost_scale  divisor on the aggregated error/violation  (default: 1.0)
+#   aggregate   rmse | mean_abs | max_abs | max_abs_plus_range
+#               (default: rmse for target_*, max_abs for limits)
 OBJECTIVES:
   # Bump steer: toe angle stays flat at 0 through vertical travel.
   - name: BumpSteer
@@ -49,10 +61,37 @@ OBJECTIVES:
     scenario: front_steer
     cost_scale: 1400.0
 
-  # Keepout-zone interference.
+  # Axle plunge stays within +-15 mm everywhere in the travel x steer sweep.
+  - name: AxlePlunge
+    type: window
+    metric: axle_plunge_mm
+    scenario: sweep_space
+    min: -15.0
+    max: 15.0
+    cost_scale: 5.0
+
+  # Peak CV joint angle stays under 30 deg across the travel x steer sweep.
+  - name: AxleAngle
+    type: ceiling
+    metric: axle_angle_deg
+    scenario: sweep_space
+    stat: abs_max
+    max: 30.0
+    cost_scale: 5.0
+
+  # Ground clearance must reach at least 406.4 mm somewhere in the heave sweep.
+  - name: GroundClearance
+    type: floor
+    metric: ground_clearance_mm
+    scenario: heave
+    stat: max
+    min: 406.4
+    cost_scale: 50.0
+
+  # Keepout-zone interference across the travel x steer sweep.
   - name: Interference
     type: collision
-    scenario: droop_steer
+    scenario: sweep_space
 
 # --- PARAMETERS TO OPTIMIZE ---
 # Points are allowed to move within these bounded boxes.
