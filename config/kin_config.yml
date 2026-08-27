@@ -1,13 +1,13 @@
 HARDPOINTS: '2026'
-SIM_STEPS:  40         # Number of steps for sweeping sim
+SIM_STEPS:  178         # Number of steps for sweeping sim
 SIMULATION: 'travel'    # 'steer', 'travel', 'front_steer', 'extreme', 'heave', 'roll'
 
 HALF: 'front' # 'front' or 'rear'
 SIDE: 'right' # 'left' or 'right'
 
 TRAVEL:
-  MIN: -200  # [mm] Min range to sweep TRAVEL through during sim (droop)
-  MAX: 200 # [mm] Max for range to sweep TRAVEL through during sim (jounce)
+  MIN: -36.5  # [mm] Min range to sweep TRAVEL through during sim (droop)
+  MAX: 140.5 # [mm] Max for range to sweep TRAVEL through during sim (jounce)
 
 STEER: 
   MIN: -40 # [mm] Min for range to sweep STEER through during sim
