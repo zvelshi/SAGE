@@ -72,6 +72,20 @@ def build_kin_static_values(steps: list, sim_type: str, hp, half_label: str) -> 
         _range("front_roll_angle_deg", "Front Roll Angle Range [deg]")
         _range("rear_roll_angle_deg", "Rear Roll Angle Range [deg]")
         _range("front_roll_center_z_mm", "Front Roll Center Height Range [mm]")
+
+        if sim_type == "heave":
+            def _clearance(key, label):
+                vals = [s.get(key) for s in steps if s.get(key) is not None
+                        and not (isinstance(s.get(key), float) and math.isnan(s[key]))]
+                if not vals:
+                    return
+                lo, hi = min(vals), max(vals)
+                entry = (label, f"{lo:.1f} to {hi:.1f} mm")
+                if lo < 0:
+                    entry = (label, f"{lo:.1f} to {hi:.1f} mm", {"bad": True})
+                stats.append(entry)
+            _clearance("front_ground_clearance_mm", "Front Ground Clearance Range")
+            _clearance("rear_ground_clearance_mm", "Rear Ground Clearance Range")
         return stats
 
     stats = []
@@ -124,6 +138,9 @@ def build_kin_series(steps: list, sim_type: str, wr: float = 0.0) -> dict:
             "front_roll_center_z_mm": [s["front_roll_center_z_mm"] for s in steps],
             "rear_roll_center_y_mm":  [s["rear_roll_center_y_mm"] for s in steps],
             "rear_roll_center_z_mm":  [s["rear_roll_center_z_mm"] for s in steps],
+            "front_ground_clearance_mm": [s.get("front_ground_clearance_mm") for s in steps],
+            "rear_ground_clearance_mm":  [s.get("rear_ground_clearance_mm") for s in steps],
+            "chassis_ground_angle_deg":  [s.get("chassis_ground_angle_deg") for s in steps],
         })
         return series
 
