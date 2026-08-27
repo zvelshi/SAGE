@@ -26,7 +26,7 @@ from utils.plot2d import (_build_kin_figures, _build_front_steer_figures,
                            _build_full_vehicle_figures, _build_opt_figures, _move_vline, _build_dyn_figures,
                            _build_dyno_figures, _build_sweep_space_figures, rank_solutions,
                            build_opt_health_figures, opt_health_findings,
-                           overlay_runs, enlarged)
+                           overlay_runs, enlarged, build_pareto_parcoords, build_pareto_scatter)
 from simulations.scenarios.kin.full_vehicle import FULL_VEHICLE_TYPES
 from models.vehicle import Vehicle
 from utils.misc import write_optimized_hardpoints
@@ -1112,8 +1112,49 @@ def main_page():
             ui.label(f"Pareto front — {len(F)} solutions (of {len(F_all)} evaluated)").classes(
                 "font-bold text-base text-emerald-800")
 
-            for _, fig in _build_opt_figures(F_all, F, obj_names):
-                _plot_card(fig)
+            n_obj = F.shape[1]
+            if n_obj >= 4:
+                # scatter can't show >3 axes honestly -> parallel coordinates is the
+                # primary view; a picker drives a focused 2D/3D scatter underneath.
+                _plot_card(build_pareto_parcoords(F, obj_names))
+
+                spread = np.ptp(F, axis=0)
+                default_axes = [int(i) for i in np.argsort(spread)[::-1][:3]]
+                axis_state = {"x": default_axes[0], "y": default_axes[1], "z": default_axes[2]}
+                plot_holder = ui.column().classes("w-full")
+
+                def _render_axis_scatter():
+                    idxs = [axis_state["x"], axis_state["y"]]
+                    if axis_state["z"] is not None:
+                        idxs.append(axis_state["z"])
+                    distinct = list(dict.fromkeys(idxs))
+                    plot_holder.clear()
+                    with plot_holder:
+                        if len(distinct) < 2:
+                            ui.label("Pick at least two distinct objectives.").classes(
+                                "text-orange-500 text-sm")
+                        else:
+                            _plot_card(build_pareto_scatter(F_all, F, obj_names, distinct))
+
+                with ui.row().classes("items-center gap-2 flex-wrap mt-1"):
+                    ui.label("Scatter axes:").classes("text-sm text-stone-600")
+                    for _key, _lbl, _none in (("x", "X", False), ("y", "Y", False), ("z", "Z", True)):
+                        _opts = {i: obj_names[i] for i in range(n_obj)}
+                        if _none:
+                            _opts = {-1: "— none —", **_opts}
+                        _cur = axis_state[_key]
+                        _sel = ui.select(_opts, value=(_cur if _cur is not None else -1),
+                                         label=_lbl).props("dense outlined").classes("w-52")
+
+                        def _on_axis(e, k=_key):
+                            axis_state[k] = None if e.value == -1 else int(e.value)
+                            _render_axis_scatter()
+                        _sel.on_value_change(_on_axis)
+
+                _render_axis_scatter()
+            else:
+                for _, fig in _build_opt_figures(F_all, F, obj_names):
+                    _plot_card(fig)
 
             history = getattr(optimizer, "history", [])
             if history:

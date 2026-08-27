@@ -636,6 +636,84 @@ def _build_opt_figures(F_all, F_front, obj_names):
                                     zaxis_title=obj_names[2]))
     return [("pareto", f)]
 
+def _balance_score(F_front: np.ndarray) -> np.ndarray:
+    """Normalised Euclidean distance to the ideal point for every front member
+    (lower = better all-round compromise). Uses all objectives."""
+    F = np.asarray(F_front, float)
+    Fn = (F - F.min(0)) / (np.ptp(F, 0) + 1e-9)
+    return np.linalg.norm(Fn, axis=1)
+
+def build_pareto_parcoords(F_front, obj_names) -> go.Figure:
+    """Parallel-coordinates view of the Pareto front -- one axis per objective,
+    one polyline per solution, coloured by all-round balance. The right default
+    when there are too many objectives for a scatter."""
+    F = np.asarray(F_front, float)
+    score = _balance_score(F)
+    dims = [dict(label=nm, values=F[:, i],
+                 range=[float(F[:, i].min()), float(F[:, i].max())])
+            for i, nm in enumerate(obj_names)]
+    fig = go.Figure(go.Parcoords(
+        line=dict(color=score, colorscale="Viridis", showscale=True,
+                  colorbar=dict(title="dist→ideal<br>(lower=better)", thickness=12)),
+        dimensions=dims))
+    fig.update_layout(height=430, showlegend=False,
+                       title=f"Pareto Front — {len(F)} solutions × {len(obj_names)} objectives",
+                       margin=dict(l=90, r=60, t=55, b=35))
+    return fig
+
+def build_pareto_scatter(F_all, F_front, obj_names, axes) -> go.Figure:
+    """2D or 3D scatter of the front on a chosen subset of objectives (``axes``
+    = 2 or 3 column indices). The 'best balance' marker still reflects all
+    objectives, not just the shown ones."""
+    axes = list(dict.fromkeys(int(a) for a in axes))[:3]
+    lbls = [obj_names[i] for i in axes]
+    Aa = np.asarray(F_all, float)[:, axes]
+    Af = np.asarray(F_front, float)[:, axes]
+    best = int(np.argmin(_balance_score(F_front)))
+    bpt = np.asarray(F_front, float)[best, axes]
+
+    if len(axes) == 2:
+        traces = []
+        hull = _pareto_hull_2d(Af)
+        if hull is not None:
+            traces.append(hull)
+        traces += [
+            go.Scatter(x=Aa[:, 0], y=Aa[:, 1], mode="markers",
+                       marker=dict(size=5, color="#9ca3af", opacity=0.4),
+                       name=f"All Evaluated ({len(Aa)})"),
+            go.Scatter(x=Af[:, 0], y=Af[:, 1], mode="markers",
+                       marker=dict(size=8, color=_COLORS[0], opacity=0.9,
+                                   line=dict(width=1, color="white")),
+                       name="Pareto Front"),
+            go.Scatter(x=[bpt[0]], y=[bpt[1]], mode="markers",
+                       marker=dict(size=14, symbol="star", color="red"),
+                       name="Best balance"),
+        ]
+        f = go.Figure(traces)
+        f.update_layout(**{**_LAYOUT_BASE, "height": 420}, title="Pareto Front — chosen axes",
+                         xaxis_title=lbls[0], yaxis_title=lbls[1], showlegend=True)
+        return f
+
+    traces = []
+    surface = _pareto_hull_3d(Af)
+    if surface is not None:
+        traces.append(surface)
+    traces.append(go.Scatter3d(x=Aa[:, 0], y=Aa[:, 1], z=Aa[:, 2], mode="markers",
+                                marker=dict(size=3, color="#9ca3af", opacity=0.3),
+                                name=f"All Evaluated ({len(Aa)})"))
+    traces.append(go.Scatter3d(x=Af[:, 0], y=Af[:, 1], z=Af[:, 2], mode="markers",
+                                marker=dict(size=5, color=_COLORS[0], opacity=0.9,
+                                            line=dict(width=1, color="white")),
+                                name="Pareto Front"))
+    traces.append(go.Scatter3d(x=[bpt[0]], y=[bpt[1]], z=[bpt[2]], mode="markers",
+                                marker=dict(size=8, symbol="diamond", color="red"),
+                                name="Best balance"))
+    f = go.Figure(traces)
+    f.update_layout(height=520, title="Pareto Front — chosen axes",
+                     margin=dict(l=0, r=0, t=40, b=0), showlegend=True,
+                     scene=dict(xaxis_title=lbls[0], yaxis_title=lbls[1], zaxis_title=lbls[2]))
+    return f
+
 def _move_vline(fig: go.Figure, x_val: float) -> None:
     """Move the vertical line to the new x value."""    
     if fig.layout.shapes:
