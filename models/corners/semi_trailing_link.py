@@ -122,6 +122,12 @@ class SemiTrailingLinkNumeric:
         piv_ob_w = p + Rw @ axle_ob_vec
         tl_f_current = p + Rw @ self._tl_f_local
 
+        shock_len = float(np.linalg.norm(hp.s_ib - s_ob_w))
+        if targ_shock is None and not (hp.shock_min <= shock_len <= hp.shock_max):
+            log.debug("bump_z pose puts shock at %.2fmm, outside (%s-%smm)",
+                      shock_len, hp.shock_min, hp.shock_max)
+            return None
+
         # Axle state calculation
         n_ib_dir = 1.0 if hp.piv_ib[1] > 0 else -1.0
         n_ib = np.array([0.0, n_ib_dir, 0.0])
@@ -142,6 +148,6 @@ class SemiTrailingLinkNumeric:
             "tl_f_upright": tl_f_current,
             "wheel_axis": n_ob,
             "axle_data": axle_state,
-            "shock_length": np.linalg.norm(hp.s_ib - s_ob_w),
+            "shock_length": shock_len,
         }        
         return step

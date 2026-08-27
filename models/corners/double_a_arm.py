@@ -160,6 +160,12 @@ class DoubleAArmNumeric:
         s_rel_pt_loc = ubj if hp.s_loc == 'upper' else lbj
         sha = self._shock_outboard(s_rel_pt_loc)
 
+        shock_len = float(np.linalg.norm(hp.s_ib - sha))
+        if target_shock is None and not (hp.shock_min <= shock_len <= hp.shock_max):
+            log.debug("bump_z pose puts shock at %.2fmm, outside (%s-%smm)",
+                      shock_len, hp.shock_min, hp.shock_max)
+            return None
+
         # axle calcs
         piv_ob = world(self.piv_ob_loc)
         n_ib_dir = 1.0 if hp.piv_ib[1] > 0 else -1.0
@@ -183,6 +189,6 @@ class DoubleAArmNumeric:
             "tr_ob": tr_ob,
             "wheel_axis": n_ob,
             "axle_data": axle_state,
-            "shock_length": np.linalg.norm(hp.s_ib - sha),
+            "shock_length": shock_len,
         }
         return step
