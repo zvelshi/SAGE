@@ -27,6 +27,7 @@ from utils.plot2d import (_build_kin_figures, _build_front_steer_figures,
                            build_opt_health_figures, opt_health_findings)
 from simulations.scenarios.kin.full_vehicle import FULL_VEHICLE_TYPES
 from models.vehicle import Vehicle
+from utils.misc import write_optimized_hardpoints
 from utils.logging_setup import add_console_subscriber, remove_console_subscriber, init_logging
 
 init_logging()
@@ -1126,10 +1127,30 @@ def main_page():
                                 rows=rows,
                             ).classes("text-xs w-full").props("dense flat")
 
-            with ui.row().classes("w-full items-center gap-2"):
+            with ui.row().classes("w-full items-center gap-2 flex-wrap"):
                 ui.label("Viewing solution:").classes("text-sm text-stone-600")
                 sol_select = ui.select(options=options, value=default_idx).classes("w-96").props("dense outlined")
-            sol_select.on_value_change(lambda e: render_solution(int(e.value)))
+                hp_name_in = ui.input(placeholder="new hardpoints name") \
+                    .props("dense outlined").classes("w-56")
+                hp_name_in.value = f"{sweep.hardpoints}_sol{default_idx}"
+
+                def _save_solution_hp():
+                    idx = int(sol_select.value)
+                    try:
+                        path = write_optimized_hardpoints(
+                            sweep.hardpoints, optimizer.points_map, X[idx], hp_name_in.value)
+                        _vehicle_config(os.path.splitext(os.path.basename(path))[0])  # validate
+                    except Exception as exc:
+                        ui.notify(f"Could not write hardpoints: {exc}", type="negative")
+                        return
+                    ui.notify(f"Saved → {path}  (pick it as HARDPOINTS to run)",
+                              type="positive", position="bottom-right")
+
+                ui.button("Save hardpoints", icon="save", on_click=_save_solution_hp) \
+                    .props("dense unelevated").classes("bg-emerald-600 text-white")
+            sol_select.on_value_change(lambda e: (
+                render_solution(int(e.value)),
+                hp_name_in.set_value(f"{sweep.hardpoints}_sol{int(e.value)}")))
 
             render_solution(default_idx)
 

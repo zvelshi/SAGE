@@ -1,5 +1,6 @@
 # default
 import os
+import re
 import datetime
 import shutil
 import pandas as pd
@@ -33,6 +34,31 @@ def save_configs(run_dir, config_files, hardpoints_name):
         log.debug("backed up hardpoints %s", hp_path)
     else:
         log.warning("could not find hardpoints file to back up: %s", hp_path)
+
+def write_optimized_hardpoints(base_name: str, points_map, x, out_name: str,
+                               out_dir: str = "config/hardpoints") -> str:
+    """Copy ``config/hardpoints/<base_name>.yml`` and patch only the free-variable
+    coordinates to the values in ``x`` (aligned with ``points_map`` entries
+    ``(section, yaml_point_key, axis_idx)``), saving it as ``<out_name>.yml`` in
+    ``out_dir``. Everything else -- mass/wheel/shock properties, the other points --
+    is copied verbatim. Returns the written path."""
+    with open(f"config/hardpoints/{base_name}.yml") as f:
+        data = yaml.safe_load(f)
+    nickname = next(iter(data))
+    for val, (section, pt_key, axis_idx) in zip(x, points_map):
+        data[nickname][section][pt_key][axis_idx] = round(float(val), 3)
+
+    safe = re.sub(r"_+", "_", re.sub(r"[^A-Za-z0-9._-]", "_", str(out_name).strip())).strip("._-")
+    safe = safe or f"{base_name}_opt"
+    os.makedirs(out_dir, exist_ok=True)
+    dest = os.path.join(out_dir, f"{safe}.yml")
+    with open(dest, "w") as f:
+        f.write(f"# optimized from '{base_name}' on "
+                f"{datetime.datetime.now():%Y-%m-%d %H:%M}\n\n")
+        yaml.safe_dump(data, f, sort_keys=False)
+    log.info("wrote optimized hardpoints -> %s", dest)
+    return dest
+
 
 def pack_points_nicely(vehicle, id, step):
     """
