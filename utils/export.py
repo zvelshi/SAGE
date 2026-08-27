@@ -348,6 +348,7 @@ def list_available_runs() -> list:
                 "run_dir": run_dir,
                 "timestamp": ts,
                 "sim_type": sim_type,
+                "hardpoints_name": hp_name,
                 "label": f"[{mode}] {ts} - {sim_type} ({hp_name})",
             })
     return runs

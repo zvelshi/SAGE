@@ -1,4 +1,5 @@
 # default
+import copy
 from typing import Any
 
 # third-party
@@ -870,3 +871,68 @@ def opt_health_findings(history: list, F_front: np.ndarray, obj_names: list, *,
                             f"(range {rng[j]/scale[j]*100:.1f}% of its mean) - it isn't being "
                             f"traded off; check its cost_scale or drop it"))
     return out
+
+
+# --------------------------------------------------------------------------- #
+#  Multi-run overlay + plot enlargement                                       #
+# --------------------------------------------------------------------------- #
+
+# one colour + line style per comparison run (up to 4)
+_CMP_RUN_COLORS = ["#9333ea", "#0891b2", "#d97706", "#db2777"]
+_CMP_RUN_DASH = ["dash", "dot", "dashdot", "longdash"]
+
+
+def _relabel(fig: go.Figure, label: str, *, group: str) -> None:
+    for tr in fig.data:
+        orig = (tr.name or "").strip()
+        tr.name = f"{label} · {orig}" if orig else label
+        tr.legendgroup = group
+        tr.showlegend = True
+    fig.update_layout(showlegend=True)
+
+
+def overlay_runs(current_label: str, base_named_figs: list,
+                 comparisons: list) -> list:
+    """Merge extra runs' traces into the current run's figures, keyed by figure
+    name. ``base_named_figs`` = ``[(key, go.Figure)]`` for the current run;
+    ``comparisons`` = ``[(label, [(key, go.Figure)])]``. Each comparison run is
+    recoloured/dashed and its trace names prefixed with its label. Mutates and
+    returns ``base_named_figs``."""
+    if not comparisons:
+        return base_named_figs
+
+    for key, fig in base_named_figs:
+        _relabel(fig, current_label, group=current_label)
+
+    for i, (label, named) in enumerate(comparisons):
+        color = _CMP_RUN_COLORS[i % len(_CMP_RUN_COLORS)]
+        dash = _CMP_RUN_DASH[i % len(_CMP_RUN_DASH)]
+        by_key = dict(named)
+        for key, base_fig in base_named_figs:
+            cf = by_key.get(key)
+            if cf is None:
+                continue
+            for tr in cf.data:
+                tr = copy.deepcopy(tr)
+                orig = (tr.name or "").strip()
+                tr.name = f"{label} · {orig}" if orig else label
+                tr.legendgroup = label
+                tr.showlegend = True
+                if getattr(tr, "line", None) is not None:
+                    tr.line.color = color
+                    tr.line.dash = dash
+                    tr.line.width = 1.4
+                if getattr(tr, "marker", None) is not None:
+                    tr.marker.color = color
+                base_fig.add_trace(tr)
+            base_fig.update_layout(showlegend=True)
+    return base_named_figs
+
+
+def enlarged(fig: go.Figure) -> go.Figure:
+    """A copy of ``fig`` sized to fill a full-screen dialog."""
+    big = copy.deepcopy(fig)
+    big.update_layout(height=None, autosize=True,
+                      margin=dict(l=60, r=30, t=50, b=50),
+                      legend=dict(orientation="h", y=-0.15))
+    return big

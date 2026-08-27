@@ -1,5 +1,6 @@
 # default
 import asyncio
+import json
 import traceback
 import time
 import os
@@ -24,7 +25,8 @@ from utils.scene3d import (_build_scene, _update_scene, _fit_camera,
 from utils.plot2d import (_build_kin_figures, _build_front_steer_figures,
                            _build_full_vehicle_figures, _build_opt_figures, _move_vline, _build_dyn_figures,
                            _build_dyno_figures, _build_sweep_space_figures, rank_solutions,
-                           build_opt_health_figures, opt_health_findings)
+                           build_opt_health_figures, opt_health_findings,
+                           overlay_runs, enlarged)
 from simulations.scenarios.kin.full_vehicle import FULL_VEHICLE_TYPES
 from models.vehicle import Vehicle
 from utils.misc import write_optimized_hardpoints
@@ -100,7 +102,7 @@ def main_page():
     opt_prog: dict = {}
     opt_live: dict = {}      # widget handles for the live optimizer panel
     run_lookup = {}
-    compare_state = {"active": False, "run_dir": None}
+    compare_state = {"active": False, "run_dirs": []}
     display_items: list = []
 
     ui.add_head_html("""<style>
@@ -201,7 +203,8 @@ def main_page():
                 edit_display_btn = ui.button("Add Graphs", icon="tune", on_click=lambda: edit_display_dialog.open()) \
                     .props("outline dense size=sm").classes("text-stone-700 border-stone-300 text-base")
                 edit_display_btn.visible = False
-                compare_sel = ui.select({}, label="Compare vs").classes("w-56").props("dense outlined")
+                compare_sel = ui.select({}, label="Compare vs", multiple=True) \
+                    .classes("w-72").props("dense outlined use-chips max-values=4")
                 compare_btn = ui.button("Compare", icon="compare_arrows").props("outline dense size=sm").classes("text-stone-700 border-stone-300")
                 compare_clear_btn = ui.button(icon="close").props("flat dense round size=sm").classes("text-stone-500")
                 compare_sel.visible = compare_btn.visible = compare_clear_btn.visible = False
@@ -274,6 +277,19 @@ def main_page():
             return None
         return lr[5] if cache["mode"] == "kin" else lr[2]
 
+    def _run_hp_name(run_dir):
+        try:
+            with open(os.path.join(run_dir, "run_meta.json")) as f:
+                return json.load(f).get("hardpoints_name", "?")
+        except Exception:
+            return "?"
+
+    def _run_label(run_dir, *, current=False):
+        rec = run_lookup.get(run_dir, {})
+        hp = rec.get("hardpoints_name") or _run_hp_name(run_dir)
+        ts = rec.get("timestamp") or os.path.basename(run_dir)
+        return f"{hp} ({ts}){' (current)' if current else ''}"
+
     def _refresh_compare_options():
         mode = cache.get("mode")
         sim_type = cache.get("sim_type")
@@ -284,12 +300,10 @@ def main_page():
         this_run = _current_run_dir()
         matches = [r for r in list_available_runs()
                    if r["mode"] == mode and r["sim_type"] == sim_type and r["run_dir"] != this_run]
-        run_lookup.update({r["run_dir"]: r for r in matches})  # keep labels usable even if run_lookup
-                                                                 # hasn't been refreshed since this run was created
-        options = {r["run_dir"]: r["label"] for r in matches}
+        run_lookup.update({r["run_dir"]: r for r in matches})
+        options = {r["run_dir"]: _run_label(r["run_dir"]) for r in matches}
         compare_sel.options = options
-        if options and compare_sel.value not in options:
-            compare_sel.value = next(iter(options))
+        compare_sel.value = [rd for rd in compare_state["run_dirs"] if rd in options]
         compare_sel.update()
 
         compare_sel.visible = bool(options)
@@ -312,18 +326,19 @@ def main_page():
         _refresh_compare_options()
 
     def do_compare():
-        run_dir = compare_sel.value
-        if not run_dir:
-            ui.notify("Select a run to compare against first.", type="warning"); return
-        compare_state["active"], compare_state["run_dir"] = True, run_dir
+        run_dirs = list(compare_sel.value or [])
+        if not run_dirs:
+            ui.notify("Select at least one run to compare against.", type="warning"); return
+        prev = dict(compare_state)
+        compare_state["active"], compare_state["run_dirs"] = True, run_dirs[:4]
         try:
             _rerender_current()
         except Exception as exc:
-            compare_state["active"], compare_state["run_dir"] = False, None
+            compare_state.update(prev)
             ui.notify(f"Could not load comparison run: {exc}", type="negative", timeout=8000)
 
     def do_clear_compare():
-        compare_state["active"], compare_state["run_dir"] = False, None
+        compare_state["active"], compare_state["run_dirs"] = False, []
         _rerender_current()
 
     def do_load_run():
@@ -338,7 +353,7 @@ def main_page():
             cache["named_figs"].clear(); cache["plot_elems"].clear()
             cache["steps"] = []; cache["scene_objs"] = None
             cache["xs"] = []
-            compare_state["active"], compare_state["run_dir"] = False, None
+            compare_state["active"], compare_state["run_dirs"] = False, []
             viz_area.clear()
 
             if meta["mode"] == "kin":
@@ -381,7 +396,7 @@ def main_page():
         cache["named_figs"].clear(); cache["plot_elems"].clear()
         cache["steps"] = []; cache["scene_objs"] = None
         cache["xs"] = []
-        compare_state["active"], compare_state["run_dir"] = False, None
+        compare_state["active"], compare_state["run_dirs"] = False, []
 
         _start_console()
 
@@ -549,7 +564,7 @@ def main_page():
                 opt_live["plots"].clear()
                 with opt_live["plots"]:
                     for _, fig in build_opt_health_figures(hist, opt_prog.get("obj_names", [])):
-                        ui.plotly(fig).classes("w-full")
+                        _plot_card(fig)
 
     opt_poll_timer = ui.timer(0.4, _poll_opt_progress, active=False)
     ui.add_css("""
@@ -742,24 +757,44 @@ def main_page():
         except (TypeError, ValueError):
             return None
 
-    def _render_stat_compare_table(current_pairs, cmp_pairs, cmp_label):
-        cmp_map = {p[0]: p[1] for p in cmp_pairs}
+    def _render_stat_compare_table(current_label, current_pairs, cmp_sets):
+        """cmp_sets = [(label, stat_pairs), ...] -- one column per comparison run."""
+        cmp_maps = [{p[0]: p[1] for p in pairs} for _, pairs in cmp_sets]
         rows = []
         for label, cur_val, *_ in current_pairs:
-            cmp_val = cmp_map.get(label, "—")
-            cur_num, cmp_num = _parse_num(cur_val), _parse_num(cmp_val)
-            delta = f"{cur_num - cmp_num:+.3f}" if cur_num is not None and cmp_num is not None else "—"
-            rows.append({"metric": label, "current": cur_val, "compare": cmp_val, "delta": delta})
-        ui.label("Static Values — Current vs Compare").classes("font-bold text-sm text-stone-700 mt-1")
-        ui.table(
-            columns=[
-                {"name": "metric", "label": "Metric", "field": "metric", "align": "left"},
-                {"name": "current", "label": "Current", "field": "current", "align": "right"},
-                {"name": "compare", "label": cmp_label, "field": "compare", "align": "right"},
-                {"name": "delta", "label": "Δ", "field": "delta", "align": "right"},
-            ],
-            rows=rows,
-        ).classes("text-xs w-full mb-2").props("dense flat")
+            row = {"metric": label, "cur": cur_val}
+            for j, m in enumerate(cmp_maps):
+                row[f"c{j}"] = m.get(label, "—")
+            rows.append(row)
+        cols = [{"name": "metric", "label": "Metric", "field": "metric", "align": "left"},
+                {"name": "cur", "label": current_label, "field": "cur", "align": "right"}]
+        for j, (lbl, _) in enumerate(cmp_sets):
+            cols.append({"name": f"c{j}", "label": lbl, "field": f"c{j}", "align": "right"})
+        ui.label("Static Values — Current vs Comparisons").classes("font-bold text-sm text-stone-700 mt-1")
+        ui.table(columns=cols, rows=rows).classes("text-xs w-full mb-2").props("dense flat")
+
+    def _open_plot_dialog(fig):
+        dlg = ui.dialog().props("maximized")
+        with dlg, ui.card().classes("w-full h-full p-0 gap-0").style("max-width:100vw"):
+            with ui.row().classes(
+                "w-full justify-end p-1 bg-stone-100 border-b border-stone-200"
+            ).style("flex-shrink:0"):
+                ui.button(icon="close", on_click=dlg.close).props("flat dense round size=sm") \
+                    .classes("text-stone-600")
+            with ui.column().classes("w-full p-2").style("flex:1;min-height:0"):
+                ui.plotly(enlarged(fig)).classes("w-full h-full")
+        dlg.open()
+
+    def _plot_card(fig, *, classes="w-full"):
+        """A plotly element with a hover 'enlarge' affordance that opens it in a
+        maximized dialog. Returns the ui.plotly element (for scrubber updates)."""
+        with ui.element("div").classes(f"{classes} relative"):
+            pel = ui.plotly(fig).classes("w-full")
+            ui.button(icon="zoom_out_map", on_click=lambda: _open_plot_dialog(fig)) \
+                .props("flat dense round size=sm") \
+                .classes("absolute top-1 right-1 z-10 bg-white/80 text-stone-500 "
+                         "opacity-40 hover:opacity-100")
+        return pel
 
     def _render_kin(result):
         sim_type, steps, vehicle, sweep, corner_id, run_dir = result
@@ -779,44 +814,61 @@ def main_page():
 
             cache.update(steps=steps, sim_type=sim_type, vehicle=vehicle, hp=hp)
 
-            cmp_steps = cmp_hp = cmp_label = None
-            if compare_state["active"] and compare_state["run_dir"] and sim_type not in NO_COMPARE_SIM_TYPES:
-                try:
-                    cmp_payload = load_kin_run_data(compare_state["run_dir"])
-                    if cmp_payload["sim_type"] == sim_type:
-                        cmp_steps = cmp_payload["steps"]
-                        cmp_corner_id = cmp_payload.get("corner_id") or corner_id
-                        cmp_vehicle = Vehicle(_vehicle_config(
-                            cmp_payload.get("hardpoints_name"), compare_state["run_dir"]))
-                        cmp_hp = cmp_vehicle.get_corner_from_id(cmp_corner_id).hardpoints
-                        cmp_label = run_lookup.get(compare_state["run_dir"], {}).get(
-                            "timestamp", compare_state["run_dir"])
-                except Exception as exc:
-                    ui.notify(f"Comparison run failed to load: {exc}", type="negative")
-
-            if cmp_steps:
-                ui.label(f"Comparing against: {cmp_label}").classes("text-xs text-purple-700 bg-purple-50 px-2 py-1 rounded w-fit")
-
             half_label = "Rear" if corner_id[1] == 1 else "Front"
+            current_label = _run_label(run_dir, current=True)
+
+            comparisons = []      # [(label, named_figs)]
+            cmp_stat_sets = []    # [(label, stat_pairs)]
+            if compare_state["active"] and sim_type not in NO_COMPARE_SIM_TYPES:
+                for rd in compare_state["run_dirs"]:
+                    try:
+                        cmp_payload = load_kin_run_data(rd)
+                    except Exception as exc:
+                        ui.notify(f"Comparison run failed to load: {exc}", type="negative")
+                        continue
+                    if cmp_payload["sim_type"] != sim_type or not cmp_payload["steps"]:
+                        continue
+                    c_steps = cmp_payload["steps"]
+                    c_cid = cmp_payload.get("corner_id") or corner_id
+                    c_vehicle = Vehicle(_vehicle_config(cmp_payload.get("hardpoints_name"), rd))
+                    c_hp = c_vehicle.get_corner_from_id(c_cid).hardpoints
+                    c_label = _run_label(rd)
+                    if sim_type == "front_steer":
+                        c_figs, _ = _build_front_steer_figures(c_steps)
+                    elif sim_type in FULL_VEHICLE_TYPES:
+                        c_figs, _ = _build_full_vehicle_figures(
+                            c_steps, mode=sim_type,
+                            wr_front=c_vehicle.front_left.hardpoints.wr,
+                            wr_rear=c_vehicle.rear_left.hardpoints.wr)
+                    else:
+                        c_figs, _ = _build_kin_figures(c_steps, half_label=half_label,
+                                                       wr=c_hp.wr, sim_type=sim_type)
+                    comparisons.append((c_label, c_figs))
+                    cmp_stat_sets.append(
+                        (c_label, build_kin_static_values(c_steps, sim_type, c_hp, half_label)))
+
+            if comparisons:
+                ui.label("Comparing against: " + ", ".join(lbl for lbl, _ in comparisons)).classes(
+                    "text-xs text-purple-700 bg-purple-50 px-2 py-1 rounded w-fit")
+
             if sim_type == "front_steer":
-                named_figs, xs = _build_front_steer_figures(steps, cmp_steps=cmp_steps, cmp_label=cmp_label or "Compare")
+                named_figs, xs = _build_front_steer_figures(steps)
             elif sim_type in FULL_VEHICLE_TYPES:
                 named_figs, xs = _build_full_vehicle_figures(steps, mode=sim_type,
                                                                wr_front=vehicle.front_left.hardpoints.wr,
-                                                               wr_rear=vehicle.rear_left.hardpoints.wr,
-                                                               cmp_steps=cmp_steps, cmp_label=cmp_label or "Compare")
+                                                               wr_rear=vehicle.rear_left.hardpoints.wr)
             else:
-                named_figs, xs = _build_kin_figures(steps, half_label=half_label, wr=hp.wr, sim_type=sim_type,
-                                                     cmp_steps=cmp_steps, cmp_wr=(cmp_hp.wr if cmp_hp else 0.0),
-                                                     cmp_label=cmp_label or "Compare")
+                named_figs, xs = _build_kin_figures(steps, half_label=half_label, wr=hp.wr,
+                                                     sim_type=sim_type)
+            if comparisons:
+                named_figs = overlay_runs(current_label, named_figs, comparisons)
             stat_pairs = build_kin_static_values(steps, sim_type, hp, half_label)
 
             cache["xs"] = xs
             cache["named_figs"] = named_figs
 
-            if cmp_steps:
-                cmp_stat_pairs = build_kin_static_values(cmp_steps, sim_type, cmp_hp, half_label)
-                _render_stat_compare_table(stat_pairs, cmp_stat_pairs, cmp_label or "Compare")
+            if cmp_stat_sets:
+                _render_stat_compare_table(current_label, stat_pairs, cmp_stat_sets)
             elif stat_pairs:
                 with ui.row().classes("w-full gap-2 flex-wrap"):
                     for label, value, *rest in stat_pairs:
@@ -855,7 +907,7 @@ def main_page():
                 sweep_figs = _build_sweep_space_figures(steps)
                 with ui.grid(columns=2 if len(sweep_figs) >= 2 else len(sweep_figs)).classes("w-full gap-2"):
                     for key, fig in sweep_figs:
-                        pel = ui.plotly(fig).classes("w-full")
+                        pel = _plot_card(fig)
                         _add_display_item(key.replace("_", " ").title(), pel, default_visible=True, category="3d")
 
             # 2D plots
@@ -863,7 +915,7 @@ def main_page():
             with ui.grid(columns=ncols).classes("w-full gap-2"):
                 plot_elems = []
                 for key, fig in named_figs:
-                    pel = ui.plotly(fig).classes("w-full")
+                    pel = _plot_card(fig)
                     plot_elems.append(pel)
                     _add_display_item(key.replace("_", " ").title(), pel, default_visible=False, category="2d")
             cache["plot_elems"] = plot_elems
@@ -929,21 +981,33 @@ def main_page():
                     ui.icon("folder", color="teal")
                     ui.label(f"Dyno Results Exported to: {out_file}").classes("text-sm text-stone-700 font-mono")
 
-            cmp_steps = cmp_vehicle = cmp_label = None
-            if compare_state["active"] and compare_state["run_dir"] and sim_type not in NO_COMPARE_SIM_TYPES:
-                try:
-                    cmp_payload = load_dyn_run_data(compare_state["run_dir"])
-                    if cmp_payload["sim_type"] == sim_type:
-                        cmp_steps = cmp_payload["steps"]
-                        cmp_vehicle = Vehicle(_vehicle_config(
-                            cmp_payload.get("hardpoints_name"), compare_state["run_dir"]))
-                        cmp_label = run_lookup.get(compare_state["run_dir"], {}).get(
-                            "timestamp", compare_state["run_dir"])
-                except Exception as exc:
-                    ui.notify(f"Comparison run failed to load: {exc}", type="negative")
+            current_label = _run_label(run_dir, current=True)
+            comparisons = []      # [(label, named_figs)]
+            cmp_stat_sets = []    # [(label, stat_pairs)]
+            if compare_state["active"] and sim_type not in NO_COMPARE_SIM_TYPES:
+                for rd in compare_state["run_dirs"]:
+                    try:
+                        cmp_payload = load_dyn_run_data(rd)
+                    except Exception as exc:
+                        ui.notify(f"Comparison run failed to load: {exc}", type="negative")
+                        continue
+                    if cmp_payload["sim_type"] != sim_type or not cmp_payload["steps"]:
+                        continue
+                    c_steps = cmp_payload["steps"]
+                    c_vehicle = Vehicle(_vehicle_config(cmp_payload.get("hardpoints_name"), rd))
+                    c_label = _run_label(rd)
+                    if sim_type == "shock_dyno":
+                        c_figs, _ = _build_dyno_figures(c_steps)
+                    else:
+                        c_figs, _ = _build_dyn_figures(c_steps)
+                    comparisons.append((c_label, c_figs))
+                    if sim_type != "shock_dyno":
+                        cmp_stat_sets.append(
+                            (c_label, build_dyn_static_values(c_steps, sim_type, c_vehicle)))
 
-            if cmp_steps:
-                ui.label(f"Comparing against: {cmp_label}").classes("text-xs text-purple-700 bg-purple-50 px-2 py-1 rounded w-fit")
+            if comparisons:
+                ui.label("Comparing against: " + ", ".join(lbl for lbl, _ in comparisons)).classes(
+                    "text-xs text-purple-700 bg-purple-50 px-2 py-1 rounded w-fit")
 
             if sim_type != "shock_dyno":
                 corner_wr = {
@@ -955,9 +1019,8 @@ def main_page():
                 # Built via build_dyn_static_values() (a thin wrapper around _build_dyn_stats)
                 # so the current/compare sides always use the exact same label text.
                 stat_pairs = build_dyn_static_values(steps, sim_type, vehicle)
-                if cmp_steps:
-                    cmp_stat_pairs = build_dyn_static_values(cmp_steps, sim_type, cmp_vehicle)
-                    _render_stat_compare_table(stat_pairs, cmp_stat_pairs, cmp_label or "Compare")
+                if cmp_stat_sets:
+                    _render_stat_compare_table(current_label, stat_pairs, cmp_stat_sets)
                 elif stat_pairs:
                     with ui.row().classes("w-full gap-2 flex-wrap"):
                         for label, value in stat_pairs:
@@ -995,10 +1058,12 @@ def main_page():
                 _mount_parts_tree(scene_objs)
 
             if sim_type == "shock_dyno":
-                named_figs, xs = _build_dyno_figures(steps, cmp_steps=cmp_steps, cmp_label=cmp_label or "Compare")
+                named_figs, xs = _build_dyno_figures(steps)
             else:
-                named_figs, xs = _build_dyn_figures(steps, cmp_steps=cmp_steps, cmp_label=cmp_label or "Compare")
-                
+                named_figs, xs = _build_dyn_figures(steps)
+            if comparisons:
+                named_figs = overlay_runs(current_label, named_figs, comparisons)
+
             cache["xs"] = xs
             cache["named_figs"] = named_figs
 
@@ -1006,7 +1071,7 @@ def main_page():
             with ui.grid(columns=ncols).classes("w-full gap-2 mt-2"):
                 plot_elems = []
                 for key, fig in named_figs:
-                    pel = ui.plotly(fig).classes("w-full")
+                    pel = _plot_card(fig)
                     plot_elems.append(pel)
                     _add_display_item(key.replace("_", " ").title(), pel, default_visible=False, category="2d")
             cache["plot_elems"] = plot_elems
@@ -1048,7 +1113,7 @@ def main_page():
                 "font-bold text-base text-emerald-800")
 
             for _, fig in _build_opt_figures(F_all, F, obj_names):
-                ui.plotly(fig).classes("w-full")
+                _plot_card(fig)
 
             history = getattr(optimizer, "history", [])
             if history:
@@ -1071,7 +1136,7 @@ def main_page():
                             ui.icon(ic).classes(f"{cls} mt-0.5")
                             ui.label(text).classes("text-stone-700")
                     for _, fig in build_opt_health_figures(history, obj_names):
-                        ui.plotly(fig).classes("w-full")
+                        _plot_card(fig)
 
             if X is None or not len(X):
                 return
