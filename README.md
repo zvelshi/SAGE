@@ -182,7 +182,14 @@ N_OFFSPRINGS: 75          # Offspring generated per generation
 MAX_GEN: 40                # Number of generations to run
 M_PROB: 1.0                 # Polynomial mutation probability
 M_ETA: 15                    # Polynomial mutation eta (distribution index)
+N_WORKERS: 8                 # process pool for design evaluation (default: min(cpu, 8); 1 = serial)
 # Note: the optimizer's random seed is hardcoded to 1 in optimization/engine.py — not configurable via YAML.
+
+# Each generation's designs are evaluated in parallel across N_WORKERS processes; results are
+# deterministic (identical to serial). The Optimizer tab shows live per-generation convergence
+# (hypervolume, front size, % feasible) while running and an "Optimization health" panel after —
+# flagging non-convergence, low feasibility, inactive objectives, and crowded-out solutions.
+# Set SAGE_DEBUG=1 for a full per-design run.log.
 
 # OBJECTIVES TO MINIMIZE — every entry is a mapping with a `type:`.
 #   target_* : run `scenario`, read `metric` per step, cost the drift from a
