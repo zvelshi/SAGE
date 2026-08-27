@@ -28,6 +28,21 @@ class SuspensionSweep(Scenario):
 
         self.solver = SingleCornerSolver(vehicle, self.corner_id)
 
+        # droop_steer / jounce_steer hold the corner at one travel extreme while
+        # sweeping steer. Anchor those extremes to the shock's mechanical stroke
+        # (full extension / full compression), tightened by TRAVEL only if the
+        # config asks for less -- feeding a raw TRAVEL value straight in silently
+        # yields zero steps whenever it exceeds the shock's limits.
+        corner = vehicle.get_corner_from_id(self.corner_id)
+        shock_static = corner.solver.len["shock_static"]
+        eps = 1e-3
+        mech_droop  = shock_static - corner.hardpoints.shock_max + eps   # travel_mm < 0
+        mech_jounce = shock_static - corner.hardpoints.shock_min - eps   # travel_mm > 0
+        self._droop_travel  = max(mech_droop, config.travel.min)
+        self._jounce_travel = min(mech_jounce, config.travel.max)
+        log.debug("steer-at-extreme travel: droop %.1fmm, jounce %.1fmm",
+                  self._droop_travel, self._jounce_travel)
+
     def run(self) -> List[Dict]:
         steps = []
         count = self.config.sim_steps
@@ -65,7 +80,7 @@ class SuspensionSweep(Scenario):
         elif sim_type == "droop_steer":
             steer_vals = get_range('STEER')
             for s in steer_vals:
-                res = self.solver.solve(steer_mm=s, travel_mm=self.config.travel.min)
+                res = self.solver.solve(steer_mm=s, travel_mm=self._droop_travel)
                 if res:
                     res['x_val'] = s
                     res['x_label'] = "Rack Travel [mm]"
@@ -76,7 +91,7 @@ class SuspensionSweep(Scenario):
         elif sim_type == "jounce_steer":
             steer_vals = get_range('STEER')
             for s in steer_vals:
-                res = self.solver.solve(steer_mm=s, travel_mm=self.config.travel.max)
+                res = self.solver.solve(steer_mm=s, travel_mm=self._jounce_travel)
                 if res:
                     res['x_val'] = s
                     res['x_label'] = "Rack Travel [mm]"
