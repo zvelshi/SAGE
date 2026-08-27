@@ -216,12 +216,13 @@ OBJECTIVES:
     stat: abs_max
     max: 30.0
     cost_scale: 5.0
-  - name: GroundClearance      # heave must lift clearance to ≥ 406.4 mm
-    type: floor
+  - name: GroundClearance      # heave peak ≥ 406.4 mm, dip ≥ 76.2 mm
+    type: limit
     metric: ground_clearance_mm
     scenario: heave
-    stat: max
-    min: 406.4
+    bounds:
+      max: {min: 406.4}
+      min: {min: 76.2}
     cost_scale: 50.0
   - name: Interference
     type: collision
@@ -285,7 +286,7 @@ COLLISION_GROUPS:
 | `target_range` | `min`, `max` | Same, with `target` the straight line from `min` (at the sweep's lowest `x`) to `max` (at its highest). |
 | `target_const` | `const` | Same, with `target(x) = const` everywhere. |
 | `target_zero` | — | Same, with `target(x) = 0` everywhere. |
-| `limit` | `min` and/or `max`, `stat` | `aggregate(max(0, min − v) + max(0, v − max)) / cost_scale`, where `v` is the per-step metric (`stat: value`) or a scalar summary of it (`stat: max` \| `min` \| `mean` \| `range` \| `abs_max`). |
+| `limit` | `min` and/or `max`, `stat`; or `bounds` | `aggregate(max(0, min − v) + max(0, v − max)) / cost_scale`, where `v` is the per-step metric (`stat: value`) or a scalar summary of it (`stat: max` \| `min` \| `mean` \| `range` \| `abs_max`). `bounds` (`{stat: {min?, max?}}`) bounds several stats at once and sums their violations. |
 | `window` | `min`, `max` | `limit` with `stat: value` — the metric must stay inside `[min, max]` at every step. |
 | `ceiling` | `max`, `stat` | `limit` with only an upper bound. |
 | `floor` | `min`, `stat` | `limit` with only a lower bound. |
