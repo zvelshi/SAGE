@@ -93,7 +93,7 @@ class DoubleAArmNumeric:
 
         hp = self.hp
         target_shock = self._shock0 - travel_mm if travel_mm is not None else None
-        if target_shock and not (hp.shock_min <= target_shock <= hp.shock_max):
+        if target_shock is not None and not (hp.shock_min <= target_shock <= hp.shock_max):
             log.debug("target shock length %.2fmm out of bounds (%s-%smm)",
                       target_shock, hp.shock_min, hp.shock_max)
             return None
@@ -133,7 +133,7 @@ class DoubleAArmNumeric:
             r[4] = np.linalg.norm(tr_ib_offset - tr_ob) - target_tie
             
             # shock / wheel
-            if target_shock:
+            if target_shock is not None:
                 r[5] = np.linalg.norm(hp.s_ib - sha) - target_shock
             else:
                 r[5] = wc[2] - target_wheel
