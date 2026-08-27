@@ -156,6 +156,7 @@ _TREE_LABELS = {
     "tie_guide": "Tie Rod Axis", "axle_guide": "Axle Axis",
     "ground": "Ground Plane", "chassis": "Chassis Plane", "contacts": "Contact Patches",
     "low_pt": "Reference Point", "gauge_f": "Front Gauge", "gauge_r": "Rear Gauge",
+    "corner": "Suspension", "free_boxes": "Free-Point Ranges", "zones": "Keepout Zones",
 }
 
 # Composites that start hidden (their parts-tree node is unticked on load).
@@ -416,7 +417,8 @@ def _build_config_preview_scene(scene, hp, free_points_cfg: dict, keepout_cfg: l
                 continue
             center = getattr(hp, attr)
             free_boxes[pt_name] = _make_free_point_box(scene, center, deltas)
-        objs["free_boxes"] = free_boxes
+        if free_boxes:
+            objs["free_boxes"] = free_boxes
 
         zones = {}
         for i, zone in enumerate(keepout_cfg or []):
@@ -428,12 +430,10 @@ def _build_config_preview_scene(scene, hp, free_points_cfg: dict, keepout_cfg: l
                 continue
             name = zone.get("name", f"zone_{i}")
             color = zone_colors.get(name, zone_color(i))
-            zones[name] = (
-                _make_keepout_zone(scene, p1, p2, zone.get("shape", "cylinder"),
-                                    zone.get("dim1", 10.0), zone.get("dim2"), color),
-                color,
-            )
-        objs["zones"] = zones
+            zones[name] = _make_keepout_zone(scene, p1, p2, zone.get("shape", "cylinder"),
+                                              zone.get("dim1", 10.0), zone.get("dim2"), color)
+        if zones:
+            objs["zones"] = zones
     return objs
 
 def _fit_camera(scene, step, hp):
