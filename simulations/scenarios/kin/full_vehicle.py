@@ -9,6 +9,7 @@ import numpy as np
 from simulations.scenarios.base import Scenario
 from simulations.solvers import SingleCornerSolver
 from utils.geometry import roll_center_yz, get_contact_patch
+from utils.spatial import Point, Line, Plane
 from utils.misc import log_to_file
 
 FULL_VEHICLE_TYPES = {"roll", "heave"}
@@ -16,10 +17,10 @@ FULL_VEHICLE_TYPES = {"roll", "heave"}
 class FullVehicleScenario(Scenario):
     """Sweeps all four corners together -- 'heave' moves all four the same direction
     (jounce -> droop), 'roll' moves the left and right sides oppositely (each side's
-    front/rear corners moving together). Driven by wheel-centre vertical travel
+    front/rear corners moving together). Driven by wheel-center vertical travel
     (bump_z), not shock travel: front and rear have different motion ratios, so an
     equal shock travel_mm on every corner does NOT move the wheels by equal amounts
-    and the 3D view looks unsynced. bump_z shifts each wheel centre by the same
+    and the 3D view looks unsynced. bump_z shifts each wheel center by the same
     absolute Z regardless of that corner's motion ratio, keeping the visualization
     genuinely synced. The bump_z range is calibrated from how far the front-left wheel
     actually travels across TRAVEL.MIN..MAX, so it stays in the same ballpark as the
@@ -46,13 +47,19 @@ class FullVehicleScenario(Scenario):
         self.bump_min = (at_min['wc'][2] - fl_hp.wc[2]) if at_min else tmin
         self.bump_max = (at_max['wc'][2] - fl_hp.wc[2]) if at_max else tmax
 
-        # Roll centre height is conventionally quoted above the ground (the tyre
+        # Roll center height is conventionally quoted above the ground (the tire
         # contact patch at static ride height), not above the hardpoints' raw Z=0 --
         # those don't coincide here (Z=0 sits ~15mm below the static contact patch).
         fl0 = self.fl_solver.solve(steer_mm=0.0, bump_z=0.0)
         rl0 = self.rl_solver.solve(steer_mm=0.0, bump_z=0.0)
         self.front_ground_z = get_contact_patch(fl0, self.wr_front)[2] if fl0 else 0.0
         self.rear_ground_z  = get_contact_patch(rl0, self.wr_rear)[2] if rl0 else 0.0
+
+        # Chassis bottom plane: a whole-vehicle property (Plane) built once when the
+        # Vehicle is created -- horizontal, 1in below the lowest inboard front
+        # lower a arm point
+        self.chassis_plane = vehicle.chassis_bottom_plane
+        self.cog_point = vehicle.cog_point
 
     def _build_step(self, t, fl, fr, rl, rr, perturbed) -> Dict:
         front_track = abs(fl['wc'][1] - fr['wc'][1])
@@ -72,6 +79,8 @@ class FullVehicleScenario(Scenario):
         front_rc = roll_center_yz(fl, fl_p, fl_m, fr, fr_p, fr_m, self.wr_front)
         rear_rc  = roll_center_yz(rl, rl_p, rl_m, rr, rr_p, rr_m, self.wr_rear)
 
+        gc = self._ground_clearance(fl, fr, rl, rr, front_x, rear_x)
+
         return {
             "input": t, "fl": fl, "fr": fr, "rl": rl, "rr": rr,
             "front_track_mm": front_track, "rear_track_mm": rear_track,
@@ -84,6 +93,62 @@ class FullVehicleScenario(Scenario):
             "front_roll_center_z_mm": (front_rc[1] - self.front_ground_z) if front_rc is not None else None,
             "rear_roll_center_y_mm": rear_rc[0] if rear_rc is not None else None,
             "rear_roll_center_z_mm": (rear_rc[1] - self.rear_ground_z) if rear_rc is not None else None,
+            **gc,
+        }
+
+    def _ground_clearance(self, fl, fr, rl, rr, front_x, rear_x) -> Dict:
+        """Front/rear distance between the fixed chassis-bottom plane and the
+        four-contact-patch ground plane, plus the sagittal angle between the two
+        planes and the raw geometry needed to draw them in 3D.
+
+        The ground plane is built directly (no fitting): the left/right contact
+        patches at each axle share X and Z and differ only in Y, so their
+        midpoints give the front- and rear-axle contact centers, and the plane is
+        the one through both centers running parallel to the Y (lateral) axis."""
+        none = {
+            "front_ground_clearance_mm": None, "rear_ground_clearance_mm": None,
+            "chassis_ground_angle_deg": None, "gc_viz": None,
+        }
+        chassis = self.chassis_plane
+        if chassis is None:
+            return none
+        fl_c = Point(get_contact_patch(fl, self.wr_front))
+        fr_c = Point(get_contact_patch(fr, self.wr_front))
+        rl_c = Point(get_contact_patch(rl, self.wr_rear))
+        rr_c = Point(get_contact_patch(rr, self.wr_rear))
+        contacts = [fl_c, fr_c, rl_c, rr_c]
+        if not all(c.is_finite() for c in contacts):
+            return none
+        front_c = fl_c.midpoint_to(fr_c)
+        rear_c  = rl_c.midpoint_to(rr_c)
+        try:
+            ground = Plane.from_points_and_direction(front_c, rear_c, Point(0.0, 1.0, 0.0))
+        except ValueError:
+            return none
+        ground_centroid = front_c.midpoint_to(rear_c)
+
+        def clearance_at(x: float) -> float:
+            v = Line.vertical_through(x, 0.0)
+            return chassis.intersect_line(v).z - ground.intersect_line(v).z
+
+        cf, cr = clearance_at(front_x), clearance_at(rear_x)
+        low_point = chassis.point.translated(dz=25.4)  # the inboard lower-A-arm pickup itself
+        return {
+            "front_ground_clearance_mm": cf,
+            "rear_ground_clearance_mm":  cr,
+            "chassis_ground_angle_deg":  chassis.sagittal_angle_to(ground),
+            "gc_viz": {
+                "ground_centroid": ground_centroid.to_list(),
+                "ground_normal": ground.normal.to_list(),
+                "contacts": [c.to_list() for c in contacts],
+                "chassis_bottom_z": chassis.point.z,
+                "chassis_low_point": low_point.to_list(),
+                "cog_point": self.cog_point.to_list(),
+                "front_x": front_x, "rear_x": rear_x,
+                "front_ground_z": ground.z_at(front_x, 0.0),
+                "rear_ground_z": ground.z_at(rear_x, 0.0),
+                "_front_clearance": cf, "_rear_clearance": cr,
+            },
         }
 
     def _nan_step(self, t, fl, fr, rl, rr) -> Dict:
@@ -96,9 +161,11 @@ class FullVehicleScenario(Scenario):
             "front_roll_angle_deg": np.nan, "rear_roll_angle_deg": np.nan,
             "front_roll_center_y_mm": None, "front_roll_center_z_mm": None,
             "rear_roll_center_y_mm": None, "rear_roll_center_z_mm": None,
+            "front_ground_clearance_mm": None, "rear_ground_clearance_mm": None,
+            "chassis_ground_angle_deg": None, "gc_viz": None,
         }
 
-    # Roll-centre construction needs each corner's small-bump-perturbed neighbours
+    # Roll-center construction needs each corner's small-bump-perturbed neighbours
     # (see utils.geometry.roll_center_yz) -- this is the +/- bump_z step used for that.
     _RC_EPS = 1.0
 
