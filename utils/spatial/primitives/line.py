@@ -58,5 +58,21 @@ class Line:
         ang = float(np.arccos(d))
         return float(np.degrees(ang)) if degrees else ang
 
+    def segment(self, length_mm: float, center=None) -> tuple[Point, Point]:
+        """The two endpoints of a segment of ``length_mm`` centered on ``center``
+        (default: the line's base point), lying on the line."""
+        c = self.closest_point(center) if center is not None else self.point
+        half = self.direction * (float(length_mm) / 2.0)
+        return c - half, c + half
+
+    def to_3d(self, scene, length_mm: float = 1000.0, center=None,
+              radius_mm: float = 2.0, color: str = "#888888", opacity: float = 1.0,
+              scale: float = 1.0 / 1000.0):
+        """Default 3-D representation: a thin cylinder of ``length_mm`` centered on
+        ``center`` running along the line."""
+        from utils.spatial.shapes.cylinder import Cylinder
+        a, b = self.segment(length_mm, center)
+        return Cylinder(a, b, radius_mm, color, opacity).to_3d(scene, scale)
+
     def __repr__(self) -> str:
         return f"Line(point={self.point!r}, direction={self.direction!r})"

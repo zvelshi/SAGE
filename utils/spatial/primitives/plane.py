@@ -138,5 +138,14 @@ class Plane:
         ang = slope(other) - slope(self)
         return float(np.degrees(ang)) if degrees else ang
 
+    def to_3d(self, scene, center=None, width_mm: float = 1000.0, depth_mm: float = 1000.0,
+              thickness_mm: float = 3.0, color: str = "#3a7bd5", opacity: float = 0.28,
+              scale: float = 1.0 / 1000.0):
+        """Default 3-D representation: a thin rectangular plate (bounded patch of
+        the plane) centered on ``center`` (default: the plane's base point)."""
+        from utils.spatial.shapes.cuboid import Cuboid
+        c = self.project_point(center) if center is not None else self.point
+        return Cuboid(c, self.normal, width_mm, depth_mm, thickness_mm, color, opacity).to_3d(scene, scale)
+
     def __repr__(self) -> str:
         return f"Plane(point={self.point!r}, normal={self.normal!r})"

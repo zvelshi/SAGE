@@ -50,8 +50,23 @@ class Point:
         """A copy of the underlying (3,) array."""
         return self._a.copy()
 
+    def to_np(self) -> np.ndarray:
+        """A copy of the coordinates as a length-3 numpy array."""
+        return self._a.copy()
+
+    to_array = to_np
+
     def to_list(self) -> list[float]:
         return [self.x, self.y, self.z]
+
+    def to_tuple(self) -> tuple[float, float, float]:
+        return (self.x, self.y, self.z)
+
+    def to_3d(self, scene, radius_mm: float = 10.0, color: str = "#4466bb",
+              opacity: float = 1.0, scale: float = 1.0 / 1000.0):
+        """Default 3-D representation: a small sphere at this point."""
+        from utils.spatial.shapes.sphere import Sphere
+        return Sphere(self, radius_mm, color, opacity).to_3d(scene, scale)
 
     # --- dunder ----------------------------------------------------------
     def __iter__(self):
