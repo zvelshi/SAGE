@@ -6,7 +6,8 @@ from itertools import combinations
 import numpy as np
 
 # ours
-from utils.geometry import get_toe_angle, segment_segment_distance
+from utils.geometry import get_toe_angle
+from utils.spatial import Segment
 
 class OptimizationObjective(ABC):
     def __init__(self, config: dict = None):
@@ -139,7 +140,7 @@ class PointToPointCollision(OptimizationObjective):
             for za, zb in pairs:
                 pa1, pa2 = endpoints[id(za)]
                 pb1, pb2 = endpoints[id(zb)]
-                d = segment_segment_distance(pa1, pa2, pb1, pb2)
+                d = Segment(pa1, pa2).distance_to_segment(Segment(pb1, pb2))
                 r_sum = self._zone_radius(za) + self._zone_radius(zb)
                 total_violation += max(0.0, r_sum - d)
 
