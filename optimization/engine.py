@@ -38,19 +38,22 @@ class SuspensionProblem(ElementwiseProblem):
         log_to_file(f"[EVAL] Testing Design: [{x_str}]")
         costs = []
 
+        results_by_scenario: Dict[str, Any] = {}
+
         for obj in self.opt.objectives:
             s_type = obj.get_scenario_type()
 
-            run_config = self.opt.config.copy()
-            run_config["SIMULATION"] = s_type
+            if s_type not in results_by_scenario:
+                run_config = self.opt.config.copy()
+                run_config["SIMULATION"] = s_type
+                scenario = self.opt.build_scenario(s_type, vehicle, run_config)
+                try:
+                    results_by_scenario[s_type] = scenario.run()
+                except Exception as e:
+                    log_to_file(f"  [CRASH] Sim '{s_type}' failed: {e}")
+                    results_by_scenario[s_type] = None
 
-            scenario = self.opt.build_scenario(s_type, vehicle, run_config)
-
-            try:
-                results = scenario.run()
-            except Exception as e:
-                log_to_file(f"  [CRASH] Sim '{s_type}' failed: {e}")
-                results = None
+            results = results_by_scenario[s_type]
 
             if not results:
                 costs.append(1e2)
