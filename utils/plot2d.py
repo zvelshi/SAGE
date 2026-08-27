@@ -308,7 +308,7 @@ def _build_kin_stats(steps, wr=0.0):
             ("Kingpin Angle [°]", f"{sa['kingpin_angle']:.2f}"),
             ("Caster Trail (Hub) [mm]", f"{sa['caster_trail']:.2f}"),
             ("Caster Offset (Ground) [mm]", f"{sa['caster_offset']:.2f}"),
-            ("Kingpin Offset (Wheel Centre) [mm]", f"{sa['kingpin_offset_wc']:.2f}"),
+            ("Kingpin Offset (Wheel Center) [mm]", f"{sa['kingpin_offset_wc']:.2f}"),
             ("Kingpin Offset (Ground) [mm]", f"{sa['kingpin_offset_gnd']:.2f}"),
             ("Mechanical Trail (Ground) [mm]", f"{sa['mechanical_trail']:.2f}"),
         ])
@@ -401,7 +401,9 @@ def _build_full_vehicle_figures(steps, mode="heave", wr_front=0.0, wr_rear=0.0,
     Y/Z, for a full-vehicle pitch or roll sweep."""
     xs = [s["input"] for s in steps]
     x0 = xs[0] if xs else 0.0
-    x_label = "Shock Travel [mm]"
+    # The full-vehicle sweep is driven by wheel-center vertical travel (bump_z),
+    # not shock stroke -- see FullVehicleScenario. For roll it's the left side's bump.
+    x_label = "Wheel Bump [mm]"
 
     _NO_ATT = {"camber": None, "caster": None, "toe": None}
 
