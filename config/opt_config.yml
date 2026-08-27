@@ -20,18 +20,16 @@ M_ETA: 15
 #   type: target_const   const                   flat line at a constant
 #   type: target_zero    (nothing extra)         flat line at 0
 #
-# limit / bound objectives instead keep a metric -- or one statistic of it over
-# the sweep -- inside a band, costing only the spill-out:
+# type: limit keeps chosen statistics of a metric across the sweep inside bands,
+# costing only the spill-out:
 #
-#     cost = aggregate(max(0, min - v) + max(0, v - max)) / cost_scale
+#     cost = aggregate(max(0, band.min - stat) + max(0, stat - band.max)) / cost_scale
 #
-#   type: window    v = each step; must stay within [min, max]
-#   type: ceiling   v must stay <= max
-#   type: floor     v must stay >= min
-#   type: limit     the general form: min and/or max, plus `stat`
-#   stat            value (default) | max | min | mean | range | abs_max
-#   bounds          bound several stats at once, e.g.
-#                     bounds: {max: {min: 406.4}, min: {min: 76.2}}
+#   bounds   maps a stat -> {min?, max?}. stats:
+#            value (per step) | max | min | mean | range | abs_max
+#            e.g. bounds: {value: {min: -15, max: 15}}
+#                 bounds: {abs_max: {max: 30}}
+#                 bounds: {max: {min: 406.4}, min: {min: 76.2}}
 #
 # type: collision -- keepout-zone interference over `scenario`; zones/groups
 #   come from KEEPOUT_ZONES / COLLISION_GROUPS below.
@@ -65,20 +63,20 @@ OBJECTIVES:
 
   # Axle plunge stays within +-15 mm everywhere in the travel x steer sweep.
   - name: AxlePlunge
-    type: window
+    type: limit
     metric: axle_plunge_mm
     scenario: sweep_space
-    min: -15.0
-    max: 15.0
+    bounds:
+      value: {min: -15.0, max: 15.0}
     cost_scale: 5.0
 
   # Peak CV joint angle stays under 30 deg across the travel x steer sweep.
   - name: AxleAngle
-    type: ceiling
+    type: limit
     metric: axle_angle_deg
     scenario: sweep_space
-    stat: abs_max
-    max: 30.0
+    bounds:
+      abs_max: {max: 30.0}
     cost_scale: 5.0
 
   # Ground clearance over the heave sweep: peak (at full droop) at least
