@@ -494,6 +494,19 @@ def _build_full_vehicle_figures(steps, mode="heave", wr_front=0.0, wr_rear=0.0,
             [s["front_roll_center_z_mm"] for s in steps], [s["rear_roll_center_z_mm"] for s in steps],
             [s["front_roll_center_z_mm"] for s in cmp_steps] if cmp_steps else None,
             [s["rear_roll_center_z_mm"] for s in cmp_steps] if cmp_steps else None)))
+    if any(s.get("front_ground_clearance_mm") is not None or s.get("rear_ground_clearance_mm") is not None for s in steps):
+        gc_fig = fr_fig("Ground Clearance [mm]",
+            [s.get("front_ground_clearance_mm") for s in steps],
+            [s.get("rear_ground_clearance_mm") for s in steps],
+            [s.get("front_ground_clearance_mm") for s in cmp_steps] if cmp_steps else None,
+            [s.get("rear_ground_clearance_mm") for s in cmp_steps] if cmp_steps else None)
+        gc_fig.add_hline(y=0, line_color="red", line_dash="dash", opacity=0.5)
+        figs.append(("ground_clearance", gc_fig))
+    if any(s.get("chassis_ground_angle_deg") is not None for s in steps):
+        figs.append(("chassis_ground_angle", mfig("Chassis–Ground Plane Angle [°]",
+            [s.get("chassis_ground_angle_deg") for s in steps],
+            [s.get("chassis_ground_angle_deg") for s in cmp_steps] if cmp_steps else None)))
+
     if any(s.get("front_roll_center_y_mm") is not None or s.get("rear_roll_center_y_mm") is not None for s in steps):
         figs.append(("roll_center_y", fr_fig("Roll Center Lateral Position [mm]",
             [s["front_roll_center_y_mm"] for s in steps], [s["rear_roll_center_y_mm"] for s in steps],
