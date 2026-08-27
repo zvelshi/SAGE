@@ -52,6 +52,30 @@ class Line:
     def intersect_plane(self, plane) -> Point | None:
         return plane.intersect_line(self)
 
+    def at_z(self, z: float) -> Point | None:
+        """Point where the line crosses height ``z`` (None if the line is
+        horizontal / never reaches that height)."""
+        dz = self.direction.z
+        if abs(dz) < 1e-12:
+            return None
+        return self.point_at((z - self.point.z) / dz)
+
+    def intersection(self, other: "Line", tol: float = 1e-6) -> Point | None:
+        """Intersection point of two coplanar lines. None if they are parallel,
+        or skew (closest approach farther apart than ``tol`` * scale)."""
+        d1, d2 = self.direction, other.direction
+        r = other.point - self.point
+        b = d1.dot(d2)
+        denom = 1.0 - b * b            # d1, d2 are unit vectors
+        if abs(denom) < 1e-12:
+            return None                # parallel
+        s = (r.dot(d1) - b * r.dot(d2)) / denom
+        t = (b * r.dot(d1) - r.dot(d2)) / denom
+        p1, p2 = self.point_at(s), other.point_at(t)
+        if p1.distance_to(p2) > tol * max(1.0, r.norm):
+            return None                # skew
+        return p1.midpoint_to(p2)
+
     def angle_to(self, other: "Line", degrees: bool = True) -> float:
         """Acute angle (0-90) between the two line directions."""
         d = abs(float(np.clip(self.direction.dot(other.direction), -1.0, 1.0)))
