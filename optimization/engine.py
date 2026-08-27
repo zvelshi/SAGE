@@ -146,7 +146,8 @@ class SuspensionOptimizer:
         if key == 'front_steer':
             return FrontSteerScenario(vehicle, run_config)
         if key in FULL_VEHICLE_TYPES:
-            return FullVehicleScenario(vehicle, run_config, mode=key)
+            need_rc = any("roll_center" in getattr(o, "metric", "") for o in self.objectives)
+            return FullVehicleScenario(vehicle, run_config, mode=key, roll_center=need_rc)
         raise ValueError(f"Unknown scenario type: {key}")
 
     def run(self):

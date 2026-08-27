@@ -26,10 +26,13 @@ class FullVehicleScenario(Scenario):
     actually travels across TRAVEL.MIN..MAX, so it stays in the same ballpark as the
     other kin scenarios' travel range."""
 
-    def __init__(self, vehicle, config, mode: str):
+    def __init__(self, vehicle, config, mode: str, roll_center: bool = True):
         self.config = config
         self.mode = mode
         self.vehicle = vehicle
+        # Roll centers need 8 extra perturbed solves per step; the optimizer
+        # turns this off when no objective reads a roll-center field.
+        self.roll_center = roll_center
         self.fl_solver = SingleCornerSolver(vehicle, corner_id=[0, 0])
         self.fr_solver = SingleCornerSolver(vehicle, corner_id=[1, 0])
         self.rl_solver = SingleCornerSolver(vehicle, corner_id=[0, 1])
@@ -193,17 +196,20 @@ class FullVehicleScenario(Scenario):
             rr = self.rr_solver.solve(steer_mm=0.0, bump_z=rr_b)
 
             if fl and fr and rl and rr:
-                eps = self._RC_EPS
-                perturbed = (
-                    self.fl_solver.solve(steer_mm=0.0, bump_z=fl_b + eps),
-                    self.fl_solver.solve(steer_mm=0.0, bump_z=fl_b - eps),
-                    self.fr_solver.solve(steer_mm=0.0, bump_z=fr_b + eps),
-                    self.fr_solver.solve(steer_mm=0.0, bump_z=fr_b - eps),
-                    self.rl_solver.solve(steer_mm=0.0, bump_z=rl_b + eps),
-                    self.rl_solver.solve(steer_mm=0.0, bump_z=rl_b - eps),
-                    self.rr_solver.solve(steer_mm=0.0, bump_z=rr_b + eps),
-                    self.rr_solver.solve(steer_mm=0.0, bump_z=rr_b - eps),
-                )
+                if self.roll_center:
+                    eps = self._RC_EPS
+                    perturbed = (
+                        self.fl_solver.solve(steer_mm=0.0, bump_z=fl_b + eps),
+                        self.fl_solver.solve(steer_mm=0.0, bump_z=fl_b - eps),
+                        self.fr_solver.solve(steer_mm=0.0, bump_z=fr_b + eps),
+                        self.fr_solver.solve(steer_mm=0.0, bump_z=fr_b - eps),
+                        self.rl_solver.solve(steer_mm=0.0, bump_z=rl_b + eps),
+                        self.rl_solver.solve(steer_mm=0.0, bump_z=rl_b - eps),
+                        self.rr_solver.solve(steer_mm=0.0, bump_z=rr_b + eps),
+                        self.rr_solver.solve(steer_mm=0.0, bump_z=rr_b - eps),
+                    )
+                else:
+                    perturbed = (None,) * 8
                 steps.append(self._build_step(b, fl, fr, rl, rr, perturbed))
             else:
                 log_to_file(f"[WARN] Full vehicle {self.mode} step failed at input {b:.2f}mm. "
