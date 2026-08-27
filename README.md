@@ -184,11 +184,29 @@ M_PROB: 1.0                 # Polynomial mutation probability
 M_ETA: 15                    # Polynomial mutation eta (distribution index)
 # Note: the optimizer's random seed is hardcoded to 1 in optimization/engine.py — not configurable via YAML.
 
-# OBJECTIVES TO OPTIMIZE — class names from optimization/objectives.py
+# OBJECTIVES TO MINIMIZE — every entry is a mapping with a `type:`. The target_*
+# types run `scenario`, read `metric` at each swept step, and cost the drift
+# from a target curve:  aggregate(metric - target(x)) / cost_scale
+#   type: target_curve  points: [[x, y], ...]   arbitrary piecewise-linear curve
+#   type: target_range  min / max               line between the two sweep endpoints
+#   type: target_const  const                   flat line at a constant
+#   type: target_zero   (nothing extra)         flat line at 0
+#   type: collision     (KEEPOUT_ZONES below)   keepout-zone interference penalty
 OBJECTIVES:
-  - MinimumBumpSteer
-  - ParallelSteer
-  - PointToPointCollision
+  - name: BumpSteer            # toe flat at 0 through travel
+    type: target_zero
+    metric: toe_deg
+    scenario: travel
+    aggregate: max_abs_plus_range
+    cost_scale: 150.0
+  - name: ParallelSteer        # ackermann_pct at 0 across the steer sweep
+    type: target_zero
+    metric: ackermann_pct
+    scenario: front_steer
+    cost_scale: 1400.0
+  - name: Interference
+    type: collision
+    scenario: droop_steer
 
 # PARAMETERS TO OPTIMIZE — hardpoint names from the HALF ('front'/'rear', from kin_config.yml)
 # section of the active hardpoints file. Ranges are OFFSETS from each point's
@@ -204,11 +222,8 @@ FREE_POINTS:
     y: [-50.0, 50.0]
     z: [-50.0, 50.0]
 
-# Scenario used to evaluate PointToPointCollision (default: droop_steer if omitted)
-COLLISION_SCENARIO: "droop_steer"
-
 # KEEPOUT ZONES: capsule/box volumes extruded along the segment point_a -> point_b,
-# checked for interference at every step of COLLISION_SCENARIO's sweep.
+# checked for interference at every step of a `type: collision` objective's sweep.
 #   shape: "cylinder" -> dim1 = radius (mm)
 #   shape: "box"      -> dim1, dim2 = side lengths (mm)
 # point_a/point_b use the short hardpoint codes from models/hardpoints.py's
@@ -244,14 +259,20 @@ COLLISION_GROUPS:
     - "upper_arm_r"
 ```
 
-### Available objectives (`optimization/objectives.py`)
-| Objective | Scenario evaluated | Cost |
+### Objective types (`optimization/objectives.py`)
+| `type:` | Extra fields | Cost |
 |---|---|---|
-| `MinimumBumpSteer` | `travel` (fixed) | Penalizes peak toe angle and total toe swing across the bump/droop sweep. |
-| `ParallelSteer` | `front_steer` (fixed) | RMSE of Ackermann percentage across the steer sweep — pushes toward 100% (parallel) or a custom target curve. |
-| `PointToPointCollision` | `COLLISION_SCENARIO` (default `droop_steer`) | Average penetration depth summed across all non-exempt `KEEPOUT_ZONES` pairs over the sweep. |
+| `target_curve` | `points: [[x, y], …]` | `aggregate(metric − target(x)) / cost_scale`, where `target` is the piecewise-linear curve through `points` and `x` is the scenario's sweep variable. |
+| `target_range` | `min`, `max` | Same, with `target` the straight line from `min` (at the sweep's lowest `x`) to `max` (at its highest). |
+| `target_const` | `const` | Same, with `target(x) = const` everywhere. |
+| `target_zero` | — | Same, with `target(x) = 0` everywhere. |
+| `collision` | (uses top-level `KEEPOUT_ZONES` / `COLLISION_GROUPS`) | Mean penetration depth summed across all non-exempt keepout-zone pairs over the sweep. |
 
-Every objective receives the full merged `kin_config.yml` + `opt_config.yml` dict, so scenario-specific keys (e.g. `TRAVEL`, `STEER`, `SIM_STEPS`) still apply during optimization.
+The `target_*` chain is literal inheritance: `TargetCurve` ← `TargetRange` / `TargetConstant` ← `TargetZero`.
+
+Shared `target_*` fields: `name` (label, default = the metric), `metric`, `scenario`, `cost_scale` (divisor, default `1.0`), `aggregate` (`rmse` | `mean_abs` | `max_abs` | `max_abs_plus_range`, default `rmse`). `metric` is one of the named helpers (`toe_deg`, `camber_deg`, `caster_deg`, `kingpin_angle_deg`, `caster_trail_mm`, `kingpin_offset_wc_mm`) or any scalar key present on a scenario step (`ackermann_pct`, `track_change_mm`, …). A failed/NaN step gives the `1e2` infeasibility penalty.
+
+Scenarios still receive the full merged `kin_config.yml` + `opt_config.yml` dict, so keys like `TRAVEL`, `STEER`, `SIM_STEPS` apply during optimization.
 
 Run it:
 ```bash
