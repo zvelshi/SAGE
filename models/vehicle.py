@@ -14,6 +14,7 @@ from models.components.axle import Axle
 from models.components.cv_joint import CVJoint, PlungingCVJoint
 from models.components.shock import Shock
 from models.wheel import Wheel
+from utils.spatial import Point, Plane
 from utils.misc import log_to_file
 
 class Vehicle:
@@ -44,9 +45,27 @@ class Vehicle:
         self.rear_left   = Corner(vehicle_data, (0, 1), u_mass['rl'])
         self.rear_right  = Corner(vehicle_data, (1, 1), u_mass['rr'])
 
+        self.cog_point = Point(self.cog)
+        self.chassis_bottom_plane = self._build_chassis_bottom_plane()
+
         log_to_file(f"Initialized Vehicle '{self.nickname}'")
         log_to_file(f"Calculated COG at (x={self.cog[0]:.2f}, y={self.cog[1]:.2f}, z={self.cog[2]:.2f})")
         log_to_file(f"Total Sprung Mass: {self.total_sprung_mass:.2f} kg | Front Bias: {self.sprung_bias_f*100:.1f}%")
+
+    def _build_chassis_bottom_plane(self):
+        """Chassis-bottom reference plane for ground-clearance analysis: horizontal
+        (parallel to the global X-Y / ground plane), placed one inch (25.4 mm) below
+        the lowest inboard front lower-A-arm pickup (``lower_a_arm_front`` /
+        ``lower_a_arm_rear``). Returns None if the front corner has no lower A-arm."""
+        hp = self.front_left.hardpoints
+        if not (hasattr(hp, "lf") and hasattr(hp, "lr")):
+            log_to_file("Chassis bottom plane: front corner has no lower A-arm; skipped.")
+            return None
+        lowest_inboard = min((Point(hp.lf), Point(hp.lr)), key=lambda p: p.z)
+        plane = Plane.horizontal_through(lowest_inboard.translated(dz=-25.4))
+        log_to_file(f"Chassis bottom plane at Z={plane.point.z:.2f}mm "
+                    f"(1in below inboard lower-A-arm point {lowest_inboard!r})")
+        return plane
 
     def run_simulation(self, simulation_class, **kwargs):
         simulation = simulation_class(self, kwargs.get("config", {}))
