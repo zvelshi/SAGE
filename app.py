@@ -656,7 +656,7 @@ def main_page():
                     ui.label("3D Preview").classes("text-sm font-semibold text-stone-700")
                     ui.label("drag to rotate · scroll to zoom · right-drag to pan").classes("text-xs text-stone-400 ml-2")
                 with ui.element("div").style("position:relative;width:100%"):
-                    scene3d = ui.scene(width=900, height=460, background_color="#f0f4f8", grid=(10, 100)).classes("w-full")
+                    scene3d = ui.scene(width=900, height=460, background_color="#f0f4f8", grid=False).classes("w-full")
                     _render_legend(keepout_cfg, groups_cfg)
 
         _build_config_preview_scene(scene3d, hp, free_points_cfg, keepout_cfg, groups_cfg)
@@ -763,7 +763,7 @@ def main_page():
                     ui.label("3D View").classes("text-sm font-semibold text-stone-700")
                     ui.label("drag to rotate · scroll to zoom · right-drag to pan").classes("text-xs text-stone-400 ml-2")
                 with ui.element("div").style("position:relative;width:100%") as scene_wrap:
-                    scene3d = ui.scene(width=900, height=420, background_color="#f0f4f8", grid=(10, 100)).classes("w-full")
+                    scene3d = ui.scene(width=900, height=420, background_color="#f0f4f8", grid=False).classes("w-full")
             _add_display_item("3D View", card_3d, default_visible=True, category="3d")
 
             # build objects on last valid step (widest extent) for camera fit, then update to step 0
@@ -1002,7 +1002,7 @@ def main_page():
                             ui.label("3D View — Selected Solution").classes("text-sm font-semibold text-stone-700")
                             ui.label("drag to rotate · scroll to zoom · right-drag to pan").classes("text-xs text-stone-400 ml-2")
                         with ui.element("div").style("position:relative;width:100%"):
-                            scene3d = ui.scene(width=900, height=460, background_color="#f0f4f8", grid=(10, 100)).classes("w-full")
+                            scene3d = ui.scene(width=900, height=460, background_color="#f0f4f8", grid=False).classes("w-full")
                             _render_legend(cfg.get("KEEPOUT_ZONES", []), cfg.get("COLLISION_GROUPS"))
 
                     vehicle = optimizer.create_vehicle_from_ref(X[idx])
