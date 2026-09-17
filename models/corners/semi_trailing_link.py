@@ -132,7 +132,14 @@ class SemiTrailingLinkNumeric:
         n_ib_dir = 1.0 if hp.piv_ib[1] > 0 else -1.0
         n_ib = np.array([0.0, n_ib_dir, 0.0])
         n_ob = Rw @ self.local_spindle_axis
-        axle_state = self.axle.get_state(hp.piv_ib, piv_ob_w, n_ib, n_ob)
+
+        piv_ib = self.axle.resolve_inboard(piv_ob_w)
+        if piv_ib is None:
+            log.debug("SemiTrailingLink solve: travel put the axle out of its %s reach",
+                      type(self.axle.axle_type).__name__)
+            return None
+
+        axle_state = self.axle.get_state(piv_ib, piv_ob_w, n_ib, n_ob)
 
         step = {
             "wc": p,
@@ -140,7 +147,7 @@ class SemiTrailingLinkNumeric:
             "ucl_ob": ucl_ob_w,
             "lcl_ib": hp.lcl_ib,
             "lcl_ob": lcl_ob_w,
-            "piv_ib": hp.piv_ib,
+            "piv_ib": piv_ib,
             "piv_ob": piv_ob_w,
             "s_ib": hp.s_ib,
             "s_ob": s_ob_w,

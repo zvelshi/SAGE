@@ -28,6 +28,15 @@ _C_TIE = "#14b8a6"
 _C_CMP = "#9333ea"
 _C_CMP2 = "#c026d3"
 
+# axle_type -> what plunge_mm actually means for it (see models.components.axle_type)
+_AXLE_TYPE_LABELS = {
+    "cv_plunge": "CV Joint",
+    "internal_plunge": "Internal",
+}
+
+def _plunge_title(axle_type: str | None) -> str:
+    return f"Axle Plunge — {_AXLE_TYPE_LABELS.get(axle_type, axle_type or '?')} [mm]"
+
 def _vline_shape(x: float) -> dict[str, Any]:
     """Return a vertical line shape for plotly."""
     return dict(type="line", x0=x, x1=x, y0=0, y1=1,
@@ -175,7 +184,7 @@ def _kin_x_series(steps):
     return list(range(len(steps))), "Step"
 
 def _build_kin_figures(steps, half_label="Front", wr=0.0, sim_type=None,
-                        cmp_steps=None, cmp_wr=0.0, cmp_label="Compare"):
+                        cmp_steps=None, cmp_wr=0.0, cmp_label="Compare", axle_type=None):
     """cmp_steps: optional second dataset (e.g. a previous run) overlaid as a dashed trace
     on every applicable figure, for the Web UI's run-comparison feature."""
     atts = [get_wheel_attitude(s) for s in steps]
@@ -233,7 +242,7 @@ def _build_kin_figures(steps, half_label="Front", wr=0.0, sim_type=None,
     ]
 
     if sim_type != "sweep_space":
-        figs.append(("plunge", mfig("Axle Plunge [mm]", half_label, plunge,
+        figs.append(("plunge", mfig(_plunge_title(axle_type), half_label, plunge,
             [cmp_trace(c_plunge)] if cmp_steps else None)))
 
         cv_traces = [
@@ -252,8 +261,8 @@ def _build_kin_figures(steps, half_label="Front", wr=0.0, sim_type=None,
 
     return figs, xs
 
-def _build_sweep_space_figures(steps):
-    """Build 3D surface plots (shock travel x rack travel) of CV plunge and joint angle."""
+def _build_sweep_space_figures(steps, axle_type=None):
+    """Build 3D surface plots (shock travel x rack travel) of axle plunge and joint angle."""
     travel_u = sorted({round(s.get("travel_mm", 0.0), 6) for s in steps})
     steer_u = sorted({round(s.get("steer_mm", 0.0), 6) for s in steps})
     t_idx = {v: i for i, v in enumerate(travel_u)}
@@ -287,7 +296,7 @@ def _build_sweep_space_figures(steps):
         return f
 
     return [
-        ("plunge_3d", surf("CV Plunge [mm]", plunge_grid, "Greens")),
+        ("plunge_3d", surf(_plunge_title(axle_type), plunge_grid, "Greens")),
         ("cv_3d", surf("CV Joint Angle [°]", angle_grid, "Tealgrn")),
     ]
 

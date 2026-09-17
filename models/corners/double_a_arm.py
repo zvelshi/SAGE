@@ -49,7 +49,6 @@ class DoubleAArmNumeric:
         self._sh_v0_normsq = float(np.dot(self._sh_v0, self._sh_v0))
 
         # passive axle
-        self.axle_static_len = np.linalg.norm(hp.piv_ob - hp.piv_ib)
         self.piv_ob_loc = hp.piv_ob - hp.lbj
 
         self.axle = axle
@@ -177,22 +176,14 @@ class DoubleAArmNumeric:
         n_ib = np.array([0.0, n_ib_dir, 0.0])
         n_ob = Rw @ self.local_spindle_axis
 
-        # Inboard CV joint plunges along its fixed differential-output axis
-        # (X, Z pinned at the static pivot_inboard; only Y slides) so the shaft
-        # keeps its true rigid length instead of a phantom stretch/compression.
-        dx = piv_ob[0] - hp.piv_ib[0]
-        dz = piv_ob[2] - hp.piv_ib[2]
-        rem = self.axle_static_len**2 - dx**2 - dz**2
-        if rem < 0:
-            log.debug("corner solve: travel/steer put the axle out of the CV joint's reach (rem=%.2f)", rem)
+        piv_ib = self.axle.resolve_inboard(piv_ob)
+        if piv_ib is None:
+            log.debug("corner solve: travel/steer put the axle out of its %s reach",
+                      type(self.axle.axle_type).__name__)
             return None
-        dy = np.sqrt(rem)
-        piv_ib_y = min((piv_ob[1] + dy, piv_ob[1] - dy), key=lambda yy: abs(yy - hp.piv_ib[1]))
-        piv_ib = np.array([hp.piv_ib[0], piv_ib_y, hp.piv_ib[2]])
         cv_axis_point = piv_ib - _CV_AXIS_OFFSET_MM * n_ib
 
         axle_state = self.axle.get_state(piv_ib, piv_ob, n_ib, n_ob)
-        axle_state["plunge_mm"] = float(piv_ib[1] - hp.piv_ib[1])
 
         step = {
             "lbj": lbj,

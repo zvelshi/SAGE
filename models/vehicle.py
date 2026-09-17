@@ -13,6 +13,7 @@ from models.vehicle_config import VehicleConfig
 from models.corners.double_a_arm import DoubleAArmNumeric
 from models.corners.semi_trailing_link import SemiTrailingLinkNumeric
 from models.components.axle import Axle
+from models.components.axle_type import axle_type_from_name
 from models.components.cv_joint import CVJoint, PlungingCVJoint
 from models.components.shock import Shock
 from models.wheel import Wheel
@@ -122,6 +123,8 @@ class Corner:
             joint1=PlungingCVJoint(max_angle=30, plunge_limit=30.0), # Inboard slider
             joint2=CVJoint(max_angle=30), # Outboard fixed
             length=float(np.linalg.norm(hp.piv_ob - hp.piv_ib)),
+            axle_type=axle_type_from_name(hp.axle_type),
+            piv_ib_static=hp.piv_ib,
         )
 
         self.solver = DoubleAArmNumeric(hp, axle) if isinstance(hp, DoubleAArm) else SemiTrailingLinkNumeric(hp, axle)

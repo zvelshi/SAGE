@@ -69,6 +69,9 @@ class DoubleAArmCorner(_Model):
     type_: Literal["DoubleAArm"] = Field(alias="_type", default="DoubleAArm")
     shock_setup: ShockSetup = Field(default_factory=ShockSetup)
     shock_location: Literal["upper", "lower"]
+    # Default preserves this corner's original (pre-2026-09) behavior: the
+    # front has always been modeled as a plunging CV joint.
+    axle_type: Literal["cv_plunge", "internal_plunge"] = "cv_plunge"
 
     upper_a_arm_front: Xyz
     upper_a_arm_rear: Xyz
@@ -89,6 +92,9 @@ class SemiTrailingLinkCorner(_Model):
     type_: Literal["SemiTrailingLink"] = Field(alias="_type", default="SemiTrailingLink")
     shock_setup: ShockSetup = Field(default_factory=ShockSetup)
     shock_location: Literal["upper", "lower"] = "lower"
+    # Default preserves this corner's original behavior: the rear has always
+    # been modeled with a fixed inboard pivot (plunge absorbed internally).
+    axle_type: Literal["cv_plunge", "internal_plunge"] = "internal_plunge"
 
     trailing_link_front: Xyz
     upper_camber_link_inboard: Xyz

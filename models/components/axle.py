@@ -4,6 +4,7 @@ from typing import Dict
 
 # ours
 from .joint import Joint
+from .axle_type import AxleType
 
 # third-party
 import numpy as np
@@ -18,6 +19,13 @@ class Axle:
     joint1: Joint
     joint2: Joint
     length: float # static center-to-center length
+    axle_type: AxleType
+    piv_ib_static: np.ndarray # static (hardpoints-file) inboard pivot position
+
+    def resolve_inboard(self, piv_ob: np.ndarray) -> np.ndarray | None:
+        """Where the inboard pivot sits this step, per this axle's plunge model
+        (see `AxleType`). Returns None if `piv_ob` is out of this axle type's reach."""
+        return self.axle_type.resolve_inboard(self.piv_ib_static, piv_ob, self.length)
 
     def constraints(
         self, 
@@ -53,10 +61,11 @@ class Axle:
         Does not apply penalties.
         """
         shaft_vec = p_outboard - p_inboard
-        current_len = np.linalg.norm(shaft_vec)
-        
-        # Plunge Calculation (+ve = extension, -ve = compression)
-        extension = current_len - self.length 
+
+        # Plunge Calculation (+ve = extension, -ve = compression) -- meaning
+        # depends on axle_type: joint slide distance for CVPlunge, shaft
+        # length change for InternalPlunge. See AxleType.plunge_mm.
+        plunge = self.axle_type.plunge_mm(self.piv_ib_static, p_inboard, p_outboard, self.length)
 
         # Helper to calculate the joint's operating (bend) angle.
         # The joint's normal is a directionless axis (a rotation about it, or
@@ -76,7 +85,7 @@ class Axle:
         angle_ob = get_true_angle(-shaft_vec, n_outboard)
 
         return {
-            "plunge_mm": extension,
+            "plunge_mm": plunge,
             "angle_ib_deg": np.degrees(angle_ib),
             "angle_ob_deg": np.degrees(angle_ob),
         }

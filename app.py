@@ -842,7 +842,8 @@ def main_page():
                             wr_rear=c_vehicle.rear_left.hardpoints.wr)
                     else:
                         c_figs, _ = _build_kin_figures(c_steps, half_label=half_label,
-                                                       wr=c_hp.wr, sim_type=sim_type)
+                                                       wr=c_hp.wr, sim_type=sim_type,
+                                                       axle_type=c_hp.axle_type)
                     comparisons.append((c_label, c_figs))
                     cmp_stat_sets.append(
                         (c_label, build_kin_static_values(c_steps, sim_type, c_hp, half_label)))
@@ -859,7 +860,7 @@ def main_page():
                                                                wr_rear=vehicle.rear_left.hardpoints.wr)
             else:
                 named_figs, xs = _build_kin_figures(steps, half_label=half_label, wr=hp.wr,
-                                                     sim_type=sim_type)
+                                                     sim_type=sim_type, axle_type=hp.axle_type)
             if comparisons:
                 named_figs = overlay_runs(current_label, named_figs, comparisons)
             stat_pairs = build_kin_static_values(steps, sim_type, hp, half_label)
@@ -904,7 +905,7 @@ def main_page():
 
             # 3D data plots
             if sim_type == "sweep_space":
-                sweep_figs = _build_sweep_space_figures(steps)
+                sweep_figs = _build_sweep_space_figures(steps, axle_type=hp.axle_type)
                 with ui.grid(columns=2 if len(sweep_figs) >= 2 else len(sweep_figs)).classes("w-full gap-2"):
                     for key, fig in sweep_figs:
                         pel = _plot_card(fig)

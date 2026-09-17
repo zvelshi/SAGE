@@ -12,7 +12,7 @@ from utils.geometry import get_wheel_attitude, motion_ratio_series
 from utils.logging_setup import get_logger
 
 log = get_logger(__name__)
-from utils.plot2d import _build_kin_stats, _build_dyn_stats
+from utils.plot2d import _build_kin_stats, _build_dyn_stats, _AXLE_TYPE_LABELS
 from simulations.scenarios.kin.full_vehicle import FULL_VEHICLE_TYPES
 
 _KIN_DATA_JSON = "kin_data.json"
@@ -96,7 +96,8 @@ def build_kin_static_values(steps: list, sim_type: str, hp, half_label: str) -> 
         min_plunge = min(a["plunge_mm"] for a in axle_steps)
         max_plunge = max(a["plunge_mm"] for a in axle_steps)
         abs_angle  = max(max(a["angle_ib_deg"], a["angle_ob_deg"]) for a in axle_steps)
-        stats.append((f"{half_label} Plunge Range [mm]", f"{min_plunge:.2f} to {max_plunge:.2f}"))
+        plunge_kind = _AXLE_TYPE_LABELS.get(hp.axle_type, hp.axle_type)
+        stats.append((f"{half_label} Plunge Range — {plunge_kind} [mm]", f"{min_plunge:.2f} to {max_plunge:.2f}"))
         stats.append((f"{half_label} Max Joint Angle [deg]", f"{abs_angle:.2f}"))
 
     stats.extend(_build_kin_stats(steps, wr=hp.wr))

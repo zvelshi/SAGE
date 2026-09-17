@@ -91,6 +91,8 @@ class DoubleAArm(Hardpoints):
     # wheel points
     wc: np.ndarray          # wheel center point
 
+    axle_type: str = "cv_plunge"  # 'cv_plunge' | 'internal_plunge', see models.components.axle_type
+
     _YAML_MAP = {
         "uf":     "upper_a_arm_front",
         "ur":     "upper_a_arm_rear",
@@ -112,6 +114,7 @@ class DoubleAArm(Hardpoints):
         return cls(
             **{attr: np.array(getattr(corner, yaml_key)) for attr, yaml_key in cls._YAML_MAP.items()},
             s_loc=corner.shock_location,
+            axle_type=corner.axle_type,
         )
 
     @classmethod
@@ -150,6 +153,8 @@ class SemiTrailingLink(Hardpoints):
     # wheel points
     wc: np.ndarray           # wheel center point
 
+    axle_type: str = "internal_plunge"  # 'cv_plunge' | 'internal_plunge', see models.components.axle_type
+
     _YAML_MAP = {
         "tl_f":   "trailing_link_front",
         "ucl_ib": "upper_camber_link_inboard",
@@ -166,7 +171,8 @@ class SemiTrailingLink(Hardpoints):
     @classmethod
     def from_config(cls, corner) -> "SemiTrailingLink":
         return cls(
-            **{attr: np.array(getattr(corner, yaml_key)) for attr, yaml_key in cls._YAML_MAP.items()}
+            **{attr: np.array(getattr(corner, yaml_key)) for attr, yaml_key in cls._YAML_MAP.items()},
+            axle_type=corner.axle_type,
         )
 
     @classmethod
