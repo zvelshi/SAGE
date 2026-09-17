@@ -121,19 +121,15 @@ def export_extreme_points_to_xlsx(results, run_dir, sweep, template_path="exampl
     header_row_0 = df_template.iloc[0].fillna("").tolist() 
     header_row_1 = df_template.iloc[1].fillna("").tolist() 
 
-    steer_min = sweep.steer.min
     steer_max = sweep.steer.max
-    
+
     row_targets = [
-        ("Static",         "static", "0_steer"),
-        ("Droop",          "droop",  "0_steer"),
-        ("Jounce",         "jounce", "0_steer"),
-        ("Static-Steer_L", "static", f"{steer_max}_steer"),
-        ("Droop-Steer_L",  "droop",  f"{steer_max}_steer"),
-        ("Jounce-Steer_L", "jounce", f"{steer_max}_steer"),
-        ("Static-Steer_R", "static", f"{steer_min}_steer"),
-        ("Droop-Steer_R",  "droop",  f"{steer_min}_steer"),
-        ("Jounce-Steer_R", "jounce", f"{steer_min}_steer")
+        ("Static",       "static", "0_steer"),
+        ("Droop",        "droop",  "0_steer"),
+        ("Jounce",       "jounce", "0_steer"),
+        ("Static-Steer", "static", f"{steer_max}_steer"),
+        ("Droop-Steer",  "droop",  f"{steer_max}_steer"),
+        ("Jounce-Steer", "jounce", f"{steer_max}_steer")
     ]
     
     point_mapping = {
@@ -182,23 +178,35 @@ def export_extreme_points_to_xlsx(results, run_dir, sweep, template_path="exampl
         for col_idx, col_header in enumerate(header_row_1):
             if col_idx < 2 or not col_header:
                 continue
-                
+
             base_name = col_header.split('@')[0]
-            
+
             is_mirrored = False
             if base_name.startswith("M_"):
                 is_mirrored = True
                 base_name = base_name[2:]
-            
-            axis = base_name[-1]      
-            clean_name = base_name[:-2] 
-            
+
+            axis = base_name[-1]
+            clean_name = base_name[:-2]
+
             if clean_name in point_mapping:
                 half, short_name = point_mapping[clean_name]
-                
+
                 target_side = 'right' if is_mirrored else 'left'
-                steer_val = steer_front if half == 'front' else steer_rear
-                source_data = results.get(half, {}).get(target_side, {}).get(cond, {}).get(steer_val, {})
+
+                # The row-1 tag (Active/Static/Droop/Jounce) picks which condition this
+                # column shows: "Active" tracks the row's own condition/steer, the other
+                # tags are fixed reference columns and always show that condition at
+                # neutral steer, regardless of which row we're on.
+                tag = header_row_0[col_idx]
+                if tag == "Active":
+                    col_cond = cond
+                    col_steer_val = steer_front if half == 'front' else steer_rear
+                else:
+                    col_cond = tag.lower()
+                    col_steer_val = "0_steer"
+
+                source_data = results.get(half, {}).get(target_side, {}).get(col_cond, {}).get(col_steer_val, {})
                 
                 if short_name in source_data:
                     coords = source_data[short_name] 
